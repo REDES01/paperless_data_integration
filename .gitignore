@@ -1,0 +1,14 @@
+# Never commit real secrets
+paperless/docker-compose.env
+.env
+.env.*
+!.env.example
+
+# Local state
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/

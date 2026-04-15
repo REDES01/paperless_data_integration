@@ -1,0 +1,22 @@
+# Phase 0 overlay for the Paperless stack.
+# Joins every Paperless service to the shared paperless_ml_net network
+# in addition to its default network, enabling cross-stack DNS resolution
+# to the data platform (postgres, minio, redpanda, qdrant).
+
+services:
+  webserver:
+    networks:
+      - default
+      - paperless_ml_net
+  db:
+    networks:
+      - default
+      - paperless_ml_net
+  broker:
+    networks:
+      - default
+      - paperless_ml_net
+
+networks:
+  paperless_ml_net:
+    external: true

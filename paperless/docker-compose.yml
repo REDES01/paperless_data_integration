@@ -1,0 +1,46 @@
+# Docker Compose for the Paperless-ngx stack (custom fork with ML UI pages).
+# Builds the custom image from the sibling paperless-ngx-fork repo.
+# Used together with ../overrides/paperless.override.yml for cross-stack networking.
+
+services:
+  broker:
+    image: docker.io/library/redis:8
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+
+  db:
+    image: docker.io/library/postgres:18
+    restart: unless-stopped
+    volumes:
+      - pgdata:/var/lib/postgresql
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: paperless
+
+  webserver:
+    image: paperless-ngx-ml:latest
+    build:
+      context: ../../paperless-ngx-fork
+    restart: unless-stopped
+    depends_on:
+      - db
+      - broker
+    ports:
+      - "8000:8000"
+    volumes:
+      - data:/usr/src/paperless/data
+      - media:/usr/src/paperless/media
+      - ./export:/usr/src/paperless/export
+      - ./consume:/usr/src/paperless/consume
+    env_file: docker-compose.env
+    environment:
+      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_DBHOST: db
+
+volumes:
+  data:
+  media:
+  pgdata:
+  redisdata:

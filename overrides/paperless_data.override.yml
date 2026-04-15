@@ -1,0 +1,41 @@
+# Phase 0 overlay for the data stack (paperless_data/docker/docker-compose.yaml).
+# Joins every data-stack service to the shared paperless_ml_net network
+# in addition to its default network.
+
+services:
+  postgres:
+    networks:
+      - default
+      - paperless_ml_net
+  adminer:
+    networks:
+      - default
+      - paperless_ml_net
+  minio:
+    networks:
+      - default
+      - paperless_ml_net
+  minio-init:
+    networks:
+      - default
+      - paperless_ml_net
+  redpanda:
+    networks:
+      - default
+      - paperless_ml_net
+  redpanda-init:
+    networks:
+      - default
+      - paperless_ml_net
+  redpanda-console:
+    networks:
+      - default
+      - paperless_ml_net
+  qdrant:
+    networks:
+      - default
+      - paperless_ml_net
+
+networks:
+  paperless_ml_net:
+    external: true
