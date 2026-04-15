@@ -3,16 +3,16 @@
 -- before Phase 2 (the real HTR preprocessing service) exists.
 --
 -- Idempotent: uses fixed UUIDs and ON CONFLICT DO NOTHING.
--- Drop later by deleting rows with source = 'phase1_demo_seed'.
+-- Drop later by deleting rows with filename LIKE 'demo_%' (their UUIDs are fixed too).
 
 INSERT INTO documents (id, filename, source, page_count, uploaded_at, tesseract_text, htr_text, merged_text, is_test_doc)
 VALUES
   ('11111111-1111-4111-8111-111111111111',
-   'demo_invoice_acme_2026_03.pdf', 'phase1_demo_seed', 1,
+   'demo_invoice_acme_2026_03.pdf', 'test', 1,
    NOW() - INTERVAL '6 hours',
    'INVOICE Acme Corp Date: 2026-03-15', NULL, NULL, FALSE),
   ('22222222-2222-4222-8222-222222222222',
-   'demo_lease_350_jay_st.pdf',     'phase1_demo_seed', 1,
+   'demo_lease_350_jay_st.pdf',     'test', 1,
    NOW() - INTERVAL '1 day',
    'LEASE AGREEMENT 350 Jay St Term:',  NULL, NULL, FALSE)
 ON CONFLICT (id) DO NOTHING;
