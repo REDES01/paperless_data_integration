@@ -1,8 +1,5 @@
 # Build provision_chameleon.ipynb from a list of cell specs.
 # Run: .\scripts\build_notebook.ps1
-#
-# Why a builder script? Authoring a 33-cell notebook in raw JSON is painful;
-# this lets us keep cell content in heredocs and regenerate on demand.
 
 $ErrorActionPreference = 'Stop'
 $outPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'provision_chameleon.ipynb'
@@ -25,10 +22,6 @@ function New-CodeCell($text) {
     }
 }
 
-# Use single-quoted PS here-strings (@'...'@) for any cell whose body
-# contains $ or ${...} so PowerShell does not try to interpolate them.
-# Use double-quoted (@"..."@) only when there are no shell variables inside.
-
 $cells = @(
     New-MdCell @"
 # Paperless-ngx ML Data Integration — Chameleon Deployment
@@ -39,19 +32,22 @@ Run this notebook in the **Chameleon Jupyter environment** to provision a VM and
 1. Reserves an ``m1.xlarge`` VM on KVM@TACC for 12 hours
 2. Assigns a floating IP and opens security groups for every service port
 3. Installs Docker on the VM
-4. Clones the three sibling repos (``paperless_data``, ``paperless-ngx``, ``paperless_data_integration``) into ``~/``
+4. Clones repos (``paperless_data``, ``paperless_data_integration``) into ``~/``
 5. Creates the shared ``paperless_ml_net`` Docker network
 6. Generates a ``PAPERLESS_SECRET_KEY`` and writes ``paperless/docker-compose.env``
-7. Builds the custom Paperless image (slow — frontend + runtime)
+7. Pulls the pre-built Paperless custom image from GHCR
 8. Brings up the data stack with the network override
-9. Seeds 3 fake handwritten regions so the HTR review page demos out of the box
+9. Seeds demo data into the data-stack Postgres
 10. Brings up the Paperless stack with the network override
 11. Verifies cross-stack DNS works
 12. Prints access URLs for every UI
 
+**Image build workflow:**
+The custom Paperless image (with ML UI + Django views + Kafka producer) is built **locally** using ``scripts/build_and_push.ps1`` and pushed to ``ghcr.io/redes01/paperless-ngx-ml:latest``. The VM just pulls the pre-built image — no build step on Chameleon, no GitHub CDN timeouts.
+
 **Prerequisites:**
 - A Chameleon project with KVM@TACC allocation
-- Three sibling repos pushed to GitHub and publicly cloneable (URLs configured in Step 7)
+- The GHCR image has been pushed (run ``scripts/build_and_push.ps1`` on your dev machine)
 "@
 
     New-MdCell "# Part 1 — VM Setup"
@@ -137,27 +133,21 @@ print("Docker installed.")
 
     New-MdCell @"
 ---
-# Part 2 — Clone repos and bring up the integrated stack
+# Part 2 — Deploy the integrated stack
 "@
 
     New-MdCell @"
-## Step 7 — Clone the three repos
+## Step 7 — Clone repos
 
-Edit the three repo URLs below if your forks live elsewhere. Default layout on the VM:
-
-- ``~/paperless_data/`` — data team repo
-- ``~/paperless-ngx-fork/`` — Paperless UI fork (cloned from the ``paperless-ngx`` GitHub repo, but renamed locally so the build context paths in the compose file resolve correctly)
-- ``~/paperless_data_integration/`` — this repo
+Only the data platform and the integration repo are needed on the VM. The Paperless custom image is pre-built and pulled from GHCR — no need to clone the fork source.
 "@
 
     New-CodeCell @'
 DATA_REPO        = "https://github.com/REDES01/paperless_data.git"
-FORK_REPO        = "https://github.com/REDES01/paperless-ngx.git"
 INTEGRATION_REPO = "https://github.com/REDES01/paperless_data_integration.git"
 
-s.execute("rm -rf ~/paperless_data ~/paperless-ngx-fork ~/paperless_data_integration")
+s.execute("rm -rf ~/paperless_data ~/paperless_data_integration")
 s.execute(f"git clone {DATA_REPO} ~/paperless_data")
-s.execute(f"git clone {FORK_REPO} ~/paperless-ngx-fork")
 s.execute(f"git clone {INTEGRATION_REPO} ~/paperless_data_integration")
 s.execute("ls ~/")
 print("Repos cloned.")
@@ -173,7 +163,7 @@ print("Shared network ready.")
     New-MdCell @"
 ## Step 9 — Generate ``PAPERLESS_SECRET_KEY`` and write env file
 
-Source builds of Paperless-ngx require an explicit secret key. We generate one on the VM and sed-replace the placeholder in ``paperless/docker-compose.env``. The example file also contains the ``PAPERLESS_ML_DB*`` env vars that the new Phase 1 Django views need to reach the data-stack Postgres.
+Source builds of Paperless-ngx require an explicit secret key. We generate one on the VM and write it into ``paperless/docker-compose.env``. The env file also contains the ``PAPERLESS_ML_DB*`` and ``PAPERLESS_ML_KAFKA_*`` vars.
 "@
 
     New-CodeCell @'
@@ -188,20 +178,20 @@ print("Secret key written.")
 '@
 
     New-MdCell @"
-## Step 10 — Build the Paperless custom image
+## Step 10 — Pull the pre-built Paperless image from GHCR
 
-This compiles the Angular frontend (``pnpm install`` + ``ng build``) and assembles the Python runtime image. **First build typically takes 10–15 minutes** on ``m1.xlarge``. Subsequent builds are fast due to layer caching.
+The custom image (Angular frontend with ML pages + Django ML views + Kafka producer) is built locally using ``scripts/build_and_push.ps1`` and pushed to ``ghcr.io/redes01/paperless-ngx-ml:latest``. This avoids the 10-15 min build on the VM and eliminates GitHub CDN timeout issues during Docker builds.
+
+If the image is not yet pushed, run on your dev machine first:
+```
+cd paperless_data_integration
+.\scripts\build_and_push.ps1
+```
 "@
 
     New-CodeCell @'
-s.execute(
-    "cd ~/paperless_data_integration && "
-    "sg docker -c 'docker compose -p paperless "
-    "-f paperless/docker-compose.yml "
-    "-f overrides/paperless.override.yml "
-    "build webserver'"
-)
-print("Paperless image built.")
+s.execute("sg docker -c 'docker pull ghcr.io/redes01/paperless-ngx-ml:latest'")
+print("Paperless image pulled.")
 '@
 
     New-MdCell "## Step 11 — Bring up the data stack"
@@ -214,7 +204,7 @@ print("Data stack up.")
     New-MdCell @"
 ## Step 12 — Seed demo data into the data-stack Postgres
 
-Inserts 3 fake handwritten regions across 2 fake documents into the data-stack Postgres so the HTR review page has something real to display before Phase 2 (the actual HTR preprocessing service) exists. Idempotent — safe to re-run.
+Inserts 3 fake handwritten regions across 2 fake documents so the HTR review page has something to display before the real HTR preprocessing service exists. Idempotent.
 "@
 
     New-CodeCell @'
@@ -240,7 +230,7 @@ Runs ``getent hosts`` from inside the Paperless webserver container against ``po
 
     New-CodeCell @'
 import time
-time.sleep(30)  # give Paperless a moment to finish starting
+time.sleep(30)
 s.execute("cd ~/paperless_data_integration && sg docker -c 'bash scripts/verify.sh'")
 '@
 

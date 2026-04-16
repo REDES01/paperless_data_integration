@@ -1,5 +1,5 @@
 # Docker Compose for the Paperless-ngx stack (custom fork with ML UI pages).
-# Builds the custom image from the sibling paperless-ngx-fork repo.
+# Uses pre-built image from GHCR instead of building from source.
 # Used together with ../overrides/paperless.override.yml for cross-stack networking.
 
 services:
@@ -20,9 +20,7 @@ services:
       POSTGRES_PASSWORD: paperless
 
   webserver:
-    image: paperless-ngx-ml:latest
-    build:
-      context: ../../paperless-ngx-fork
+    image: ghcr.io/redes01/paperless-ngx-ml:latest
     restart: unless-stopped
     depends_on:
       - db
