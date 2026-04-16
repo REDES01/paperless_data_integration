@@ -218,7 +218,7 @@ result = s.execute(
     "sg docker -c 'docker exec paperless-webserver-1 python manage.py shell -c \""
     "from rest_framework.authtoken.models import Token; "
     "from django.contrib.auth.models import User; "
-    "t, _ = Token.objects.get_or_create(user=User.objects.first()); "
+    "t, _ = Token.objects.get_or_create(user=User.objects.get(username=\\\"admin\\\")); "
     "print(t.key)\"'"
 )
 # Extract the token from stdout for use in later cells
