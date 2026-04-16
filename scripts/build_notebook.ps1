@@ -26,29 +26,16 @@ $cells = @(
     New-MdCell @"
 # Paperless-ngx ML Data Integration — Chameleon Deployment
 
-Run this notebook in the **Chameleon Jupyter environment** to provision a VM and bring up the integrated ML platform (Paperless-ngx UI + data stack + shared network) end-to-end.
+Run this notebook in the **Chameleon Jupyter environment** to provision a VM and bring up the integrated ML platform end-to-end.
 
-**What this notebook does:**
-1. Reserves an ``m1.xlarge`` VM on KVM@TACC for 12 hours
-2. Assigns a floating IP and opens security groups for every service port
-3. Installs Docker on the VM
-4. Clones repos (``paperless_data``, ``paperless_data_integration``) into ``~/``
-5. Creates the shared ``paperless_ml_net`` Docker network
-6. Generates a ``PAPERLESS_SECRET_KEY`` and writes ``paperless/docker-compose.env``
-7. Pulls the pre-built Paperless custom image from GHCR
-8. Brings up the data stack with the network override
-9. Seeds demo data into the data-stack Postgres
-10. Brings up the Paperless stack with the network override
-11. Verifies cross-stack DNS works
-12. Prints access URLs for every UI
-
-**Image build workflow:**
-The custom Paperless image (with ML UI + Django views + Kafka producer) is built **locally** using ``scripts/build_and_push.ps1`` and pushed to ``ghcr.io/redes01/paperless-ngx-ml:latest``. The VM just pulls the pre-built image — no build step on Chameleon, no GitHub CDN timeouts.
+**Image build workflow:** The custom Paperless image is built locally using ``scripts/build_and_push.ps1`` and pushed to ``ghcr.io/redes01/paperless-ngx-ml:latest``. The VM just pulls the pre-built image — no build step on Chameleon.
 
 **Prerequisites:**
 - A Chameleon project with KVM@TACC allocation
 - The GHCR image has been pushed (run ``scripts/build_and_push.ps1`` on your dev machine)
 "@
+
+    # ── Part 1: VM Setup ──
 
     New-MdCell "# Part 1 — VM Setup"
 
@@ -65,11 +52,7 @@ username = os.getenv("USER")
 print(f"Username: {username}")
 '@
 
-    New-MdCell @"
-## Step 2 — Reserve VM (12 hours)
-
-The integration runs both the data stack and Paperless on the same VM, so we need more RAM and CPU than the data-only notebook. ``m1.xlarge`` (8 vCPU, 16 GiB RAM) is the recommended minimum.
-"@
+    New-MdCell "## Step 2 — Reserve VM (12 hours)"
 
     New-CodeCell @'
 l = lease.Lease(
@@ -131,16 +114,11 @@ s.execute("sudo groupadd -f docker; sudo usermod -aG docker $USER")
 print("Docker installed.")
 '@
 
-    New-MdCell @"
----
-# Part 2 — Deploy the integrated stack
-"@
+    # ── Part 2: Deploy ──
 
-    New-MdCell @"
-## Step 7 — Clone repos
+    New-MdCell "---`n# Part 2 — Deploy the integrated stack"
 
-Only the data platform and the integration repo are needed on the VM. The Paperless custom image is pre-built and pulled from GHCR — no need to clone the fork source.
-"@
+    New-MdCell "## Step 7 — Clone repos"
 
     New-CodeCell @'
 DATA_REPO        = "https://github.com/REDES01/paperless_data.git"
@@ -160,11 +138,7 @@ s.execute("cd ~/paperless_data_integration && sg docker -c 'bash scripts/create_
 print("Shared network ready.")
 '@
 
-    New-MdCell @"
-## Step 9 — Generate ``PAPERLESS_SECRET_KEY`` and write env file
-
-Source builds of Paperless-ngx require an explicit secret key. We generate one on the VM and write it into ``paperless/docker-compose.env``. The env file also contains the ``PAPERLESS_ML_DB*`` and ``PAPERLESS_ML_KAFKA_*`` vars.
-"@
+    New-MdCell "## Step 9 — Generate secret key and write env file"
 
     New-CodeCell @'
 s.execute(
@@ -177,17 +151,7 @@ s.execute(
 print("Secret key written.")
 '@
 
-    New-MdCell @"
-## Step 10 — Pull the pre-built Paperless image from GHCR
-
-The custom image (Angular frontend with ML pages + Django ML views + Kafka producer) is built locally using ``scripts/build_and_push.ps1`` and pushed to ``ghcr.io/redes01/paperless-ngx-ml:latest``. This avoids the 10-15 min build on the VM and eliminates GitHub CDN timeout issues during Docker builds.
-
-If the image is not yet pushed, run on your dev machine first:
-```
-cd paperless_data_integration
-.\scripts\build_and_push.ps1
-```
-"@
+    New-MdCell "## Step 10 — Pull the pre-built Paperless image from GHCR"
 
     New-CodeCell @'
 s.execute("sg docker -c 'docker pull ghcr.io/redes01/paperless-ngx-ml:latest'")
@@ -201,11 +165,7 @@ s.execute("cd ~/paperless_data_integration && sg docker -c 'bash scripts/up_pape
 print("Data stack up.")
 '@
 
-    New-MdCell @"
-## Step 12 — Seed demo data into the data-stack Postgres
-
-Inserts 3 fake handwritten regions across 2 fake documents so the HTR review page has something to display before the real HTR preprocessing service exists. Idempotent.
-"@
+    New-MdCell "## Step 12 — Seed demo data into the data-stack Postgres"
 
     New-CodeCell @'
 s.execute(
@@ -223,18 +183,163 @@ print("Paperless stack up.")
 '@
 
     New-MdCell @"
-## Step 14 — Verify cross-stack DNS
-
-Runs ``getent hosts`` from inside the Paperless webserver container against ``postgres``, ``minio``, ``redpanda``, and ``qdrant``. All four should resolve to private IPs on ``paperless_ml_net``.
+## Step 14 — Wait for Paperless to become healthy and verify cross-stack DNS
 "@
 
     New-CodeCell @'
 import time
-time.sleep(30)
+print("Waiting 45 seconds for Paperless to finish starting...")
+time.sleep(45)
 s.execute("cd ~/paperless_data_integration && sg docker -c 'bash scripts/verify.sh'")
 '@
 
-    New-MdCell "## Step 15 — Print access URLs"
+    New-MdCell "## Step 15 — Create Paperless superuser"
+
+    New-CodeCell @'
+# Create the initial admin account for the Paperless UI.
+# Change the username/password as needed.
+s.execute(
+    "sg docker -c 'docker exec paperless-webserver-1 python manage.py shell -c \""
+    "from django.contrib.auth.models import User; "
+    "User.objects.filter(username=\\\"admin\\\").exists() or "
+    "User.objects.create_superuser(\\\"admin\\\", \\\"admin@example.com\\\", \\\"admin\\\"); "
+    "print(\\\"Superuser ready\\\")\"'"
+)
+'@
+
+    New-MdCell @"
+## Step 16 — Generate Paperless API token
+
+This token is needed by the region slicer and any API-based testing. It authenticates REST API calls from other containers on the shared network.
+"@
+
+    New-CodeCell @'
+result = s.execute(
+    "sg docker -c 'docker exec paperless-webserver-1 python manage.py shell -c \""
+    "from rest_framework.authtoken.models import Token; "
+    "from django.contrib.auth.models import User; "
+    "t, _ = Token.objects.get_or_create(user=User.objects.first()); "
+    "print(t.key)\"'"
+)
+# Extract the token from stdout for use in later cells
+PAPERLESS_TOKEN = result.stdout.strip().split("\n")[-1]
+print(f"API Token: {PAPERLESS_TOKEN}")
+'@
+
+    # ── Part 3: Build and test region slicer ──
+
+    New-MdCell "---`n# Part 3 — Region slicer"
+
+    New-MdCell @"
+## Step 17 — Build the region slicer image
+
+Small image: ``python:3.12-slim`` + ``poppler-utils``. Takes ~30 seconds.
+"@
+
+    New-CodeCell @'
+s.execute(
+    "cd ~/paperless_data_integration && "
+    "sg docker -c 'docker compose -f region_slicer/compose.yml build'"
+)
+print("Slicer image built.")
+'@
+
+    New-MdCell @"
+## Step 18 — Upload a test document to Paperless
+
+Upload a PDF through the Paperless UI (drag-and-drop at ``http://<floating-ip>:8000``), or use the API to upload programmatically. The cell below uploads a small test PDF via the API.
+
+If you prefer to upload manually through the UI, skip this cell and note the document ID from the URL bar (e.g. ``/documents/1``).
+"@
+
+    New-CodeCell @'
+# Upload a test document via the Paperless API.
+# This creates a simple PDF with text + a handwriting-like annotation.
+import tempfile, os
+
+# Create a minimal test PDF on the VM
+s.execute(
+    "python3 -c \""
+    "from reportlab.lib.pagesizes import letter; "
+    "from reportlab.pdfgen import canvas; "
+    "c = canvas.Canvas('/tmp/test_doc.pdf', pagesize=letter); "
+    "c.setFont('Helvetica', 12); "
+    "c.drawString(72, 700, 'MEMORANDUM - Budget Report 2026'); "
+    "c.drawString(72, 680, 'TO: Faculty Senate  FROM: Office of the Dean'); "
+    "c.drawString(72, 640, 'The proposed budget allocates resources across three categories.'); "
+    "c.setFont('Helvetica', 14); "
+    "c.setFillColorRGB(0.05, 0.05, 0.5); "
+    "c.drawString(400, 700, 'Approved - JW'); "
+    "c.drawString(72, 500, 'Check these numbers!!'); "
+    "c.save(); "
+    "print('Test PDF created')\" 2>/dev/null || echo 'reportlab not available, upload manually via the UI'"
+)
+
+# Upload via API
+s.execute(
+    f"sg docker -c 'docker exec paperless-webserver-1 python manage.py document_importer /usr/src/paperless/consume/ 2>/dev/null' || true; "
+    f"curl -s -X POST http://localhost:8000/api/documents/post_document/ "
+    f"-H \"Authorization: Token {PAPERLESS_TOKEN}\" "
+    f"-F document=@/tmp/test_doc.pdf "
+    f"-F title=\"Test Budget Memo\" "
+    f"| python3 -m json.tool 2>/dev/null || echo 'Upload via API — check Paperless UI for the document'"
+)
+print("Document uploaded. Check Paperless UI for the document ID.")
+'@
+
+    # ── Part 4: Verify Phase 4 (Kafka events) ──
+
+    New-MdCell "---`n# Part 4 — Verify Kafka events (Phase 4)"
+
+    New-MdCell @"
+## Step 19 — Check that the upload event landed in Redpanda
+
+When a document is uploaded, the ``paperless_ml`` Django signal handler publishes a ``paperless.uploads`` event to Redpanda. This cell reads the topic to verify.
+"@
+
+    New-CodeCell @'
+s.execute(
+    "sg docker -c 'docker exec redpanda rpk topic consume paperless.uploads "
+    "--num 5 --offset start 2>/dev/null' || "
+    "echo 'No events yet — upload a document first, or rpk not available'"
+)
+'@
+
+    New-MdCell @"
+## Step 20 — Test the region slicer (dry run)
+
+Runs region detection on the uploaded document without uploading crops to MinIO. Confirms that the slicer can reach Paperless and the detection algorithm works on a real PDF.
+
+**Replace ``--doc-id 1`` with the actual document ID if different.**
+"@
+
+    New-CodeCell @'
+s.execute(
+    f"cd ~/paperless_data_integration && "
+    f"sg docker -c 'docker compose -f region_slicer/compose.yml run --rm slicer "
+    f"demo.py --doc-id 1 --dry-run --paperless-token {PAPERLESS_TOKEN}'"
+)
+'@
+
+    New-MdCell @"
+## Step 21 — Test the region slicer (full run)
+
+Same as above but also crops each detected region and uploads the crop PNGs to MinIO. After this, check the MinIO Console (``http://<floating-ip>:9001``) → ``paperless-images`` bucket → ``documents/1/regions/`` to see the crop files.
+"@
+
+    New-CodeCell @'
+s.execute(
+    f"cd ~/paperless_data_integration && "
+    f"sg docker -c 'docker compose -f region_slicer/compose.yml run --rm slicer "
+    f"demo.py --doc-id 1 --paperless-token {PAPERLESS_TOKEN}'"
+)
+'@
+
+    # ── Part 5: Print URLs ──
+
+    New-MdCell "---`n# Part 5 — Access URLs"
+
+    New-MdCell "## Step 22 — Print access URLs"
 
     New-CodeCell @'
 s.refresh()
@@ -247,23 +352,21 @@ for net, addrs in addresses.items():
 
 print(f"Floating IP: {floating_ip}")
 print()
-print(f"  Paperless UI     ->  http://{floating_ip}:8000")
-print(f"  HTR review       ->  http://{floating_ip}:8000/ml/htr-review")
-print(f"  Semantic search  ->  http://{floating_ip}:8000/ml/search")
-print(f"  MinIO Console    ->  http://{floating_ip}:9001     (admin / paperless_minio)")
-print(f"  Adminer          ->  http://{floating_ip}:5050     (user / paperless_postgres, DB=paperless)")
-print(f"  Redpanda Console ->  http://{floating_ip}:8090")
-print(f"  Qdrant           ->  http://{floating_ip}:6333/dashboard")
+print(f"  Paperless UI       ->  http://{floating_ip}:8000           (admin / admin)")
+print(f"  HTR review         ->  http://{floating_ip}:8000/ml/htr-review")
+print(f"  Semantic search    ->  http://{floating_ip}:8000/ml/search")
+print(f"  MinIO Console      ->  http://{floating_ip}:9001           (admin / paperless_minio)")
+print(f"  Adminer (Postgres) ->  http://{floating_ip}:5050           (user / paperless_postgres)")
+print(f"  Redpanda Console   ->  http://{floating_ip}:8090")
+print(f"  Qdrant Dashboard   ->  http://{floating_ip}:6333/dashboard")
 print()
-print(f"  SSH:  ssh -i ~/.ssh/id_rsa_chameleon cc@{floating_ip}")
+print(f"  API Token: {PAPERLESS_TOKEN}")
+print(f"  SSH: ssh -i ~/.ssh/id_rsa_chameleon cc@{floating_ip}")
 '@
 
-    New-MdCell @"
----
-# Teardown
+    # ── Teardown ──
 
-Run this when you are done to release VM resources.
-"@
+    New-MdCell "---`n# Teardown`n`nRun this when you are done to release VM resources."
 
     New-CodeCell @'
 # Uncomment to release VM
