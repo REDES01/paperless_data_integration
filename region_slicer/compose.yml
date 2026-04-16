@@ -1,0 +1,38 @@
+# Region slicer — one-shot tool for detecting and cropping handwritten regions.
+#
+# Usage (from paperless_data_integration/):
+#
+#   # First, get a Paperless API token (one-time):
+#   docker exec paperless-webserver-1 python manage.py shell -c \
+#     "from rest_framework.authtoken.models import Token; from django.contrib.auth.models import User; \
+#      t, _ = Token.objects.get_or_create(user=User.objects.first()); print(t.key)"
+#
+#   # Dry run (detect only, no MinIO upload):
+#   docker compose -f region_slicer/compose.yml run --rm slicer \
+#     demo.py --doc-id 1 --dry-run --paperless-token <TOKEN>
+#
+#   # Full run (detect + crop + upload to MinIO):
+#   docker compose -f region_slicer/compose.yml run --rm slicer \
+#     demo.py --doc-id 1 --paperless-token <TOKEN>
+#
+#   # Process all documents:
+#   docker compose -f region_slicer/compose.yml run --rm slicer \
+#     demo.py --all --paperless-token <TOKEN>
+
+services:
+  slicer:
+    build:
+      context: .
+    environment:
+      PAPERLESS_URL: http://paperless-webserver-1:8000
+      PAPERLESS_TOKEN: ${PAPERLESS_TOKEN:-}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: paperless_minio
+      MINIO_BUCKET: paperless-images
+    networks:
+      - paperless_ml_net
+
+networks:
+  paperless_ml_net:
+    external: true

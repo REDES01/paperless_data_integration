@@ -1,0 +1,5 @@
+pdf2image>=1.17.0
+Pillow>=10.0
+numpy>=1.24
+minio>=7.2
+requests>=2.31
