@@ -57,3 +57,33 @@ The detector uses horizontal projection on a binarized grayscale image:
 7. Add 5px padding around each crop
 
 This catches handwritten annotations (dark ink strokes) while ignoring printed text (which is typically lighter on scanned documents). It's a heuristic, not a learned model — the data design doc notes it would be replaced by a detection model in production.
+
+## Text merging (Tesseract + HTR)
+
+Per the data design document, `merged_text = Tesseract output + HTR transcriptions`. Tesseract is already run by Paperless on every upload, so the slicer pulls Paperless's OCR `content` via the REST API instead of running Tesseract a second time.
+
+`SlicerResult` exposes:
+- `tesseract_text` — the full printed-text OCR from Paperless
+- `merge_text(htr_outputs)` — combines `tesseract_text` with a list of HTR transcriptions (one per detected region) in this format:
+  ```
+  <tesseract output>
+
+  [HANDWRITTEN]
+  <htr output region 0>
+  <htr output region 1>
+  ...
+  ```
+
+This is the string the Phase 2 consumer will write to `documents.merged_text` in the data-stack Postgres, and that the indexing service will chunk and upsert into Qdrant.
+
+### Test it
+
+```bash
+# Show just Paperless's Tesseract output for a document
+docker compose -f region_slicer/compose.yml run --rm slicer \
+  demo.py --doc-id 1 --dry-run --print-ocr --paperless-token <TOKEN>
+
+# After slicing, show what merged_text would look like (uses placeholder HTR outputs)
+docker compose -f region_slicer/compose.yml run --rm slicer \
+  demo.py --doc-id 1 --demo-merge --paperless-token <TOKEN>
+```

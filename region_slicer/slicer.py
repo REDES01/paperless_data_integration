@@ -50,13 +50,33 @@ class SlicerResult:
     paperless_doc_id: int
     title: str
     total_pages: int
+    tesseract_text: str = ""
     regions: list[SlicedRegion] = field(default_factory=list)
 
     def summary(self) -> str:
         return (
             f"Document {self.paperless_doc_id} ({self.title}): "
-            f"{self.total_pages} pages, {len(self.regions)} regions detected"
+            f"{self.total_pages} pages, {len(self.regions)} regions detected, "
+            f"{len(self.tesseract_text)} chars of Tesseract text"
         )
+
+    def merge_text(self, htr_outputs: list[str]) -> str:
+        """
+        Build merged_text per the data design doc:
+            merged_text = Tesseract printed-text output + HTR transcriptions.
+
+        htr_outputs should be the decoded text for each region in self.regions,
+        in the same order (typically emitted by the HTR preprocessing consumer
+        after calling /predict/htr for each region).
+
+        Returns a single string ready to be chunked and indexed.
+        """
+        base = (self.tesseract_text or "").strip()
+        htr_clean = [t.strip() for t in htr_outputs if t and t.strip()]
+        if not htr_clean:
+            return base
+        htr_block = "[HANDWRITTEN]\n" + "\n".join(htr_clean)
+        return f"{base}\n\n{htr_block}" if base else htr_block
 
 
 class RegionSlicer:
@@ -198,10 +218,12 @@ class RegionSlicer:
         """
         log.info("Processing document %d ...", doc_id)
 
-        # 1. Fetch metadata
+        # 1. Fetch metadata (including Tesseract OCR content)
         meta = self.fetch_document_metadata(doc_id)
         title = meta.get("title", f"document_{doc_id}")
+        tesseract_text = meta.get("content", "") or ""
         log.info("  Title: %s", title)
+        log.info("  Tesseract text: %d chars", len(tesseract_text))
 
         # 2. Download file (PDF or image)
         file_bytes, content_type = self.fetch_document_file(doc_id)
@@ -214,6 +236,7 @@ class RegionSlicer:
             paperless_doc_id=doc_id,
             title=title,
             total_pages=len(pages),
+            tesseract_text=tesseract_text,
         )
 
         # 4. Process each page

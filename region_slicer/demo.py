@@ -44,6 +44,14 @@ def dry_run(args):
     # Get doc metadata
     meta = requests.get(f"{base}/api/documents/{args.doc_id}/", headers=headers, timeout=10).json()
     print(f"Document: {meta.get('title', 'unknown')} (id={args.doc_id})")
+    tesseract_text = meta.get("content", "") or ""
+    print(f"Tesseract OCR text: {len(tesseract_text)} chars")
+    if args.print_ocr:
+        print("  " + "-" * 60)
+        preview = tesseract_text[:500] + ("..." if len(tesseract_text) > 500 else "")
+        for line in preview.split("\n"):
+            print(f"  {line}")
+        print("  " + "-" * 60)
 
     # Download file
     resp = requests.get(f"{base}/api/documents/{args.doc_id}/download/", headers=headers, timeout=60)
@@ -123,6 +131,18 @@ def full_run(args):
             print(f"    Size:     {r.width}x{r.height}")
             print(f"    MinIO:    {r.crop_s3_url}")
 
+        # Merge demo (shows what merged_text will look like when the consumer
+        # wires HTR outputs in; for now we use placeholder transcriptions)
+        if args.demo_merge and result.regions:
+            print(f"\n--- merge_text() demo (Tesseract + placeholder HTR) ---")
+            placeholder_htr = [
+                f"[handwriting for region {r.region_index}]"
+                for r in result.regions
+            ]
+            merged = result.merge_text(placeholder_htr)
+            print(merged[:800] + ("...\n[truncated]" if len(merged) > 800 else ""))
+            print(f"merged length: {len(merged)} chars")
+
         # Print JSON for piping
         print(f"\nJSON output:")
         output = {
@@ -151,6 +171,8 @@ def main():
     parser.add_argument("--doc-id", type=int, default=1, help="Paperless document ID")
     parser.add_argument("--all", action="store_true", help="Process all documents")
     parser.add_argument("--dry-run", action="store_true", help="Detect only, no MinIO upload")
+    parser.add_argument("--print-ocr", action="store_true", help="Print Tesseract OCR content from Paperless")
+    parser.add_argument("--demo-merge", action="store_true", help="After slicing, demonstrate merge_text() with fake HTR outputs")
     parser.add_argument("--dpi", type=int, default=200, help="PDF rendering DPI")
     parser.add_argument("--paperless-url", default="http://paperless-webserver-1:8000")
     parser.add_argument("--paperless-token", default="")
