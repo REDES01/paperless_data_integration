@@ -286,8 +286,8 @@ When a document is uploaded, the ``paperless_ml`` Django signal handler publishe
 "@
     New-CodeCell @'
 s.execute(
-    "sg docker -c 'docker exec redpanda rpk topic consume paperless.uploads "
-    "--num 10 --offset start 2>/dev/null' || echo 'No events yet'"
+    "sg docker -c 'timeout 5 docker exec redpanda rpk topic consume paperless.uploads "
+    "--offset start 2>/dev/null; true' || echo 'No events yet'"
 )
 '@
 
