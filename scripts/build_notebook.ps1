@@ -28,19 +28,16 @@ $cells = @(
 
 Run this notebook in the **Chameleon Jupyter environment** to provision a VM and bring up the integrated ML platform end-to-end.
 
-**Image build workflow:** The custom Paperless image is built locally using ``scripts/build_and_push.ps1`` and pushed to ``ghcr.io/redes01/paperless-ngx-ml:latest``. The VM just pulls the pre-built image — no build step on Chameleon.
+**Image build workflow:** The custom Paperless image is built locally using ``scripts/build_and_push.ps1`` and pushed to ``ghcr.io/redes01/paperless-ngx-ml:latest``. The VM just pulls the pre-built image.
 
 **Prerequisites:**
 - A Chameleon project with KVM@TACC allocation
 - The GHCR image has been pushed (run ``scripts/build_and_push.ps1`` on your dev machine)
 "@
 
-    # ── Part 1: VM Setup ──
-
     New-MdCell "# Part 1 — VM Setup"
 
     New-MdCell "## Step 1 — Select project and site"
-
     New-CodeCell @'
 from chi import server, context, lease, network
 import chi, os, datetime
@@ -53,7 +50,6 @@ print(f"Username: {username}")
 '@
 
     New-MdCell "## Step 2 — Reserve VM (12 hours)"
-
     New-CodeCell @'
 l = lease.Lease(
     f"lease-paperless-integration-{username}",
@@ -65,7 +61,6 @@ l.show()
 '@
 
     New-MdCell "## Step 3 — Launch VM instance"
-
     New-CodeCell @'
 s = server.Server(
     f"node-paperless-integration-{username}",
@@ -76,7 +71,6 @@ s.submit(idempotent=True)
 '@
 
     New-MdCell "## Step 4 — Assign floating IP"
-
     New-CodeCell @'
 s.associate_floating_ip()
 s.refresh()
@@ -84,7 +78,6 @@ s.show(type="widget")
 '@
 
     New-MdCell "## Step 5 — Open security groups"
-
     New-CodeCell @'
 security_groups = [
     {"name": "allow-ssh",  "port": 22,   "description": "SSH"},
@@ -105,7 +98,6 @@ print(f"Security groups applied: {[sg['name'] for sg in security_groups]}")
 '@
 
     New-MdCell "## Step 6 — Install Docker"
-
     New-CodeCell @'
 s.refresh()
 s.check_connectivity()
@@ -114,12 +106,9 @@ s.execute("sudo groupadd -f docker; sudo usermod -aG docker $USER")
 print("Docker installed.")
 '@
 
-    # ── Part 2: Deploy ──
-
     New-MdCell "---`n# Part 2 — Deploy the integrated stack"
 
     New-MdCell "## Step 7 — Clone repos"
-
     New-CodeCell @'
 DATA_REPO        = "https://github.com/REDES01/paperless_data.git"
 INTEGRATION_REPO = "https://github.com/REDES01/paperless_data_integration.git"
@@ -132,14 +121,12 @@ print("Repos cloned.")
 '@
 
     New-MdCell "## Step 8 — Create the shared Docker network"
-
     New-CodeCell @'
 s.execute("cd ~/paperless_data_integration && sg docker -c 'bash scripts/create_network.sh'")
 print("Shared network ready.")
 '@
 
     New-MdCell "## Step 9 — Generate secret key and write env file"
-
     New-CodeCell @'
 s.execute(
     "cd ~/paperless_data_integration/paperless && "
@@ -152,21 +139,18 @@ print("Secret key written.")
 '@
 
     New-MdCell "## Step 10 — Pull the pre-built Paperless image from GHCR"
-
     New-CodeCell @'
 s.execute("sg docker -c 'docker pull ghcr.io/redes01/paperless-ngx-ml:latest'")
 print("Paperless image pulled.")
 '@
 
     New-MdCell "## Step 11 — Bring up the data stack"
-
     New-CodeCell @'
 s.execute("cd ~/paperless_data_integration && sg docker -c 'bash scripts/up_paperless_data.sh'")
 print("Data stack up.")
 '@
 
     New-MdCell "## Step 12 — Seed demo data into the data-stack Postgres"
-
     New-CodeCell @'
 s.execute(
     "cat ~/paperless_data_integration/seed/phase1_demo_seed.sql | "
@@ -176,16 +160,12 @@ print("Demo seed inserted.")
 '@
 
     New-MdCell "## Step 13 — Bring up the Paperless stack"
-
     New-CodeCell @'
 s.execute("cd ~/paperless_data_integration && sg docker -c 'bash scripts/up_paperless.sh'")
 print("Paperless stack up.")
 '@
 
-    New-MdCell @"
-## Step 14 — Wait for Paperless to become healthy and verify cross-stack DNS
-"@
-
+    New-MdCell "## Step 14 — Wait for Paperless to become healthy and verify cross-stack DNS"
     New-CodeCell @'
 import time
 print("Waiting 45 seconds for Paperless to finish starting...")
@@ -194,7 +174,6 @@ s.execute("cd ~/paperless_data_integration && sg docker -c 'bash scripts/verify.
 '@
 
     New-MdCell "## Step 15 — Create Paperless superuser"
-
     New-CodeCell @'
 # Create the initial admin account for the Paperless UI.
 # Change the username/password as needed.
@@ -207,13 +186,10 @@ s.execute(
 )
 '@
 
-    New-MdCell @"
-## Step 16 — Generate Paperless API token
-
-This token is needed by the region slicer and any API-based testing. It authenticates REST API calls from other containers on the shared network.
-"@
-
+    New-MdCell "## Step 16 — Generate Paperless API token"
     New-CodeCell @'
+# Fetch token for the admin user specifically (NOT User.objects.first(),
+# which returns AnonymousUser and gives a token with no permissions).
 result = s.execute(
     "sg docker -c 'docker exec paperless-webserver-1 python manage.py shell -c \""
     "from rest_framework.authtoken.models import Token; "
@@ -221,21 +197,17 @@ result = s.execute(
     "t, _ = Token.objects.get_or_create(user=User.objects.get(username=\\\"admin\\\")); "
     "print(t.key)\"'"
 )
-# Extract the token from stdout for use in later cells
 PAPERLESS_TOKEN = result.stdout.strip().split("\n")[-1]
 print(f"API Token: {PAPERLESS_TOKEN}")
 '@
 
-    # ── Part 3: Build and test region slicer ──
-
-    New-MdCell "---`n# Part 3 — Region slicer"
+    New-MdCell "---`n# Part 3 — Region slicer + sample documents"
 
     New-MdCell @"
 ## Step 17 — Build the region slicer image
 
 Small image: ``python:3.12-slim`` + ``poppler-utils``. Takes ~30 seconds.
 "@
-
     New-CodeCell @'
 s.execute(
     "cd ~/paperless_data_integration && "
@@ -245,102 +217,113 @@ print("Slicer image built.")
 '@
 
     New-MdCell @"
-## Step 18 — Upload a test document to Paperless
+## Step 18 — Upload the sample documents to Paperless
 
-Upload a PDF through the Paperless UI (drag-and-drop at ``http://<floating-ip>:8000``), or use the API to upload programmatically. The cell below uploads a small test PDF via the API.
+Uploads two committed sample files from ``sample_documents/``:
 
-If you prefer to upload manually through the UI, skip this cell and note the document ID from the URL bar (e.g. ``/documents/1``).
+- ``sample_budget_memo.pdf`` — 2-page PDF with printed text + simulated handwriting
+- ``sample_scan.jpeg`` — a scanned-image document (tests the slicer's image-file path)
+
+Paperless processes each upload asynchronously (Tesseract OCR, thumbnail, classification). Expect ~30-60 seconds before the documents are query-able via the API.
 "@
-
     New-CodeCell @'
-# Upload a test document via the Paperless API.
-# This creates a simple PDF with text + a handwriting-like annotation.
-import tempfile, os
-
-# Create a minimal test PDF on the VM
+# Upload both sample files via the Paperless REST API.
 s.execute(
-    "python3 -c \""
-    "from reportlab.lib.pagesizes import letter; "
-    "from reportlab.pdfgen import canvas; "
-    "c = canvas.Canvas('/tmp/test_doc.pdf', pagesize=letter); "
-    "c.setFont('Helvetica', 12); "
-    "c.drawString(72, 700, 'MEMORANDUM - Budget Report 2026'); "
-    "c.drawString(72, 680, 'TO: Faculty Senate  FROM: Office of the Dean'); "
-    "c.drawString(72, 640, 'The proposed budget allocates resources across three categories.'); "
-    "c.setFont('Helvetica', 14); "
-    "c.setFillColorRGB(0.05, 0.05, 0.5); "
-    "c.drawString(400, 700, 'Approved - JW'); "
-    "c.drawString(72, 500, 'Check these numbers!!'); "
-    "c.save(); "
-    "print('Test PDF created')\" 2>/dev/null || echo 'reportlab not available, upload manually via the UI'"
-)
-
-# Upload via API
-s.execute(
-    f"sg docker -c 'docker exec paperless-webserver-1 python manage.py document_importer /usr/src/paperless/consume/ 2>/dev/null' || true; "
+    f"for f in ~/paperless_data_integration/sample_documents/sample_budget_memo.pdf "
+    f"~/paperless_data_integration/sample_documents/sample_scan.jpeg; do "
+    f"echo \"Uploading $f...\"; "
     f"curl -s -X POST http://localhost:8000/api/documents/post_document/ "
     f"-H \"Authorization: Token {PAPERLESS_TOKEN}\" "
-    f"-F document=@/tmp/test_doc.pdf "
-    f"-F title=\"Test Budget Memo\" "
-    f"| python3 -m json.tool 2>/dev/null || echo 'Upload via API — check Paperless UI for the document'"
+    f"-F \"document=@$f\"; "
+    f"echo; done"
 )
-print("Document uploaded. Check Paperless UI for the document ID.")
+print("\nUploads submitted. Waiting 60 seconds for Paperless to ingest them...")
+
+import time
+time.sleep(60)
+
+# List documents to see what Paperless assigned
+s.execute(
+    f"curl -s http://localhost:8000/api/documents/ "
+    f"-H \"Authorization: Token {PAPERLESS_TOKEN}\" "
+    f"| python3 -m json.tool | head -80"
+)
 '@
 
-    # ── Part 4: Verify Phase 4 (Kafka events) ──
+    New-MdCell @"
+## Step 19 — Capture document IDs for the slicer
+
+After the uploads process, grab the integer IDs Paperless assigned. Use these for the slicer runs below.
+"@
+    New-CodeCell @'
+import json
+
+# Fetch document list and extract (id, title) pairs
+r = s.execute(
+    f"curl -s http://localhost:8000/api/documents/ "
+    f"-H \"Authorization: Token {PAPERLESS_TOKEN}\""
+)
+try:
+    data = json.loads(r.stdout.strip().split("\n")[-1])
+    docs = [(d["id"], d["title"]) for d in data.get("results", [])]
+    print(f"Found {len(docs)} document(s):")
+    for doc_id, title in docs:
+        print(f"  id={doc_id}  title={title!r}")
+    # Pick the first one as default test target
+    DOC_ID = docs[0][0] if docs else 1
+    print(f"\nUsing DOC_ID = {DOC_ID} for slicer tests below.")
+except Exception as exc:
+    print(f"Failed to parse document list: {exc}")
+    DOC_ID = 1
+'@
 
     New-MdCell "---`n# Part 4 — Verify Kafka events (Phase 4)"
 
     New-MdCell @"
-## Step 19 — Check that the upload event landed in Redpanda
+## Step 20 — Check upload events in Redpanda
 
-When a document is uploaded, the ``paperless_ml`` Django signal handler publishes a ``paperless.uploads`` event to Redpanda. This cell reads the topic to verify.
+When a document is uploaded, the ``paperless_ml`` Django signal handler publishes a ``paperless.uploads`` event. You should see one event per uploaded sample document.
 "@
-
     New-CodeCell @'
 s.execute(
     "sg docker -c 'docker exec redpanda rpk topic consume paperless.uploads "
-    "--num 5 --offset start 2>/dev/null' || "
-    "echo 'No events yet — upload a document first, or rpk not available'"
+    "--num 10 --offset start 2>/dev/null' || echo 'No events yet'"
 )
 '@
 
+    New-MdCell "---`n# Part 5 — Test the region slicer"
+
     New-MdCell @"
-## Step 20 — Test the region slicer (dry run)
+## Step 21 — Slicer dry run with Tesseract output preview
 
-Runs region detection on the uploaded document without uploading crops to MinIO. Confirms that the slicer can reach Paperless and the detection algorithm works on a real PDF.
-
-**Replace ``--doc-id 1`` with the actual document ID if different.**
+Detects handwritten regions without uploading crops to MinIO, and previews Paperless's Tesseract OCR output for the same document.
 "@
-
     New-CodeCell @'
 s.execute(
     f"cd ~/paperless_data_integration && "
     f"sg docker -c 'docker compose -f region_slicer/compose.yml run --rm slicer "
-    f"demo.py --doc-id 1 --dry-run --paperless-token {PAPERLESS_TOKEN}'"
+    f"demo.py --doc-id {DOC_ID} --dry-run --print-ocr --paperless-token {PAPERLESS_TOKEN}'"
 )
 '@
 
     New-MdCell @"
-## Step 21 — Test the region slicer (full run)
+## Step 22 — Full slicer run with merge_text demo
 
-Same as above but also crops each detected region and uploads the crop PNGs to MinIO. After this, check the MinIO Console (``http://<floating-ip>:9001``) → ``paperless-images`` bucket → ``documents/1/regions/`` to see the crop files.
+Runs the full pipeline (detect + crop + upload to MinIO), then demonstrates ``SlicerResult.merge_text()`` with placeholder HTR outputs. This is the ``merged_text`` string that Phase 2 will write to Postgres and Phase 3 will chunk + upsert to Qdrant.
+
+After this, check the MinIO Console at ``http://<floating-ip>:9001`` → ``paperless-images`` bucket → ``documents/{DOC_ID}/regions/`` to see the crop PNG files.
 "@
-
     New-CodeCell @'
 s.execute(
     f"cd ~/paperless_data_integration && "
     f"sg docker -c 'docker compose -f region_slicer/compose.yml run --rm slicer "
-    f"demo.py --doc-id 1 --paperless-token {PAPERLESS_TOKEN}'"
+    f"demo.py --doc-id {DOC_ID} --demo-merge --paperless-token {PAPERLESS_TOKEN}'"
 )
 '@
 
-    # ── Part 5: Print URLs ──
+    New-MdCell "---`n# Part 6 — Access URLs"
 
-    New-MdCell "---`n# Part 5 — Access URLs"
-
-    New-MdCell "## Step 22 — Print access URLs"
-
+    New-MdCell "## Step 23 — Print access URLs"
     New-CodeCell @'
 s.refresh()
 addresses = s.addresses
@@ -364,10 +347,7 @@ print(f"  API Token: {PAPERLESS_TOKEN}")
 print(f"  SSH: ssh -i ~/.ssh/id_rsa_chameleon cc@{floating_ip}")
 '@
 
-    # ── Teardown ──
-
     New-MdCell "---`n# Teardown`n`nRun this when you are done to release VM resources."
-
     New-CodeCell @'
 # Uncomment to release VM
 # s = server.get_server(f"node-paperless-integration-{username}")
