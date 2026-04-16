@@ -107,18 +107,48 @@ class RegionSlicer:
         resp.raise_for_status()
         return resp.json()
 
-    def fetch_document_pdf(self, doc_id: int) -> bytes:
-        """Download the document PDF from Paperless."""
+    def fetch_document_file(self, doc_id: int) -> tuple[bytes, str]:
+        """
+        Download the document file from Paperless.
+        Returns (file_bytes, content_type).
+        """
         url = f"{self.paperless_url}/api/documents/{doc_id}/download/"
         resp = requests.get(url, headers=self._paperless_headers(), timeout=60)
         resp.raise_for_status()
-        return resp.content
+        content_type = resp.headers.get("Content-Type", "application/octet-stream")
+        return resp.content, content_type
 
-    def pdf_to_pages(self, pdf_bytes: bytes) -> list[Image.Image]:
-        """Convert a PDF to a list of PIL Images, one per page."""
-        pages = convert_from_bytes(pdf_bytes, dpi=self.dpi)
-        log.info("Converted PDF to %d page image(s) at %d DPI", len(pages), self.dpi)
-        return pages
+    def file_to_pages(self, file_bytes: bytes, content_type: str) -> list[Image.Image]:
+        """
+        Convert a document file to a list of PIL Images.
+        Handles PDFs (via pdf2image/poppler) and images (JPEG, PNG, TIFF, etc.).
+        """
+        ct = content_type.lower()
+
+        # Image files → single "page"
+        if ct.startswith("image/") or ct in ("application/octet-stream",):
+            try:
+                img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+                log.info("Opened image file as single page (%dx%d, %s)", img.width, img.height, ct)
+                return [img]
+            except Exception:
+                pass  # fall through to PDF path
+
+        # PDF files → multiple pages
+        if ct == "application/pdf" or file_bytes[:5] == b"%PDF-":
+            pages = convert_from_bytes(file_bytes, dpi=self.dpi)
+            log.info("Converted PDF to %d page image(s) at %d DPI", len(pages), self.dpi)
+            return pages
+
+        # Unknown type — try as image first, then PDF
+        try:
+            img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+            log.info("Opened unknown file type as image (%dx%d)", img.width, img.height)
+            return [img]
+        except Exception:
+            pages = convert_from_bytes(file_bytes, dpi=self.dpi)
+            log.info("Converted unknown file type as PDF to %d page(s)", len(pages))
+            return pages
 
     def upload_crop(self, crop: Image.Image, doc_id: int, page_num: int, region_idx: int) -> str:
         """
@@ -173,12 +203,12 @@ class RegionSlicer:
         title = meta.get("title", f"document_{doc_id}")
         log.info("  Title: %s", title)
 
-        # 2. Download PDF
-        pdf_bytes = self.fetch_document_pdf(doc_id)
-        log.info("  Downloaded %d bytes", len(pdf_bytes))
+        # 2. Download file (PDF or image)
+        file_bytes, content_type = self.fetch_document_file(doc_id)
+        log.info("  Downloaded %d bytes (%s)", len(file_bytes), content_type)
 
         # 3. Convert to page images
-        pages = self.pdf_to_pages(pdf_bytes)
+        pages = self.file_to_pages(file_bytes, content_type)
 
         result = SlicerResult(
             paperless_doc_id=doc_id,

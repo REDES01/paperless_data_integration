@@ -45,14 +45,28 @@ def dry_run(args):
     meta = requests.get(f"{base}/api/documents/{args.doc_id}/", headers=headers, timeout=10).json()
     print(f"Document: {meta.get('title', 'unknown')} (id={args.doc_id})")
 
-    # Download PDF
-    pdf_bytes = requests.get(f"{base}/api/documents/{args.doc_id}/download/", headers=headers, timeout=60).content
-    print(f"PDF: {len(pdf_bytes)} bytes")
+    # Download file
+    resp = requests.get(f"{base}/api/documents/{args.doc_id}/download/", headers=headers, timeout=60)
+    file_bytes = resp.content
+    content_type = resp.headers.get("Content-Type", "application/octet-stream")
+    print(f"File: {len(file_bytes)} bytes ({content_type})")
 
-    # Convert pages
-    from pdf2image import convert_from_bytes
-    pages = convert_from_bytes(pdf_bytes, dpi=args.dpi)
-    print(f"Pages: {len(pages)}")
+    # Convert to page images (handles both PDF and image files)
+    ct = content_type.lower()
+    if ct.startswith("image/") or not (ct == "application/pdf" or file_bytes[:5] == b"%PDF-"):
+        try:
+            from PIL import Image as _Img
+            img = _Img.open(io.BytesIO(file_bytes)).convert("RGB")
+            pages = [img]
+            print(f"Opened as image: {img.width}x{img.height}")
+        except Exception:
+            from pdf2image import convert_from_bytes
+            pages = convert_from_bytes(file_bytes, dpi=args.dpi)
+            print(f"Pages: {len(pages)}")
+    else:
+        from pdf2image import convert_from_bytes
+        pages = convert_from_bytes(file_bytes, dpi=args.dpi)
+        print(f"Pages: {len(pages)}")
 
     total_regions = 0
     for page_num, page_image in enumerate(pages, start=1):
