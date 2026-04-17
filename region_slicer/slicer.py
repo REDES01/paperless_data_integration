@@ -120,12 +120,34 @@ class RegionSlicer:
             headers["Authorization"] = f"Token {self.paperless_token}"
         return headers
 
-    def fetch_document_metadata(self, doc_id: int) -> dict:
-        """Fetch document metadata from Paperless REST API."""
+    def fetch_document_metadata(self, doc_id: int, retries: int = 6, retry_delay: float = 5.0) -> dict:
+        """
+        Fetch document metadata from Paperless REST API.
+
+        Retries on 404 because Paperless publishes the upload event as soon as
+        the Document row is saved, but OCR + thumbnail generation run afterwards
+        in Celery — during that window the REST API can briefly 404 or omit
+        the OCR `content` field. We retry up to ~30 seconds to let ingestion finish.
+        """
+        import time
         url = f"{self.paperless_url}/api/documents/{doc_id}/"
-        resp = requests.get(url, headers=self._paperless_headers(), timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+        last_exc = None
+        for attempt in range(retries):
+            try:
+                resp = requests.get(url, headers=self._paperless_headers(), timeout=10)
+                if resp.status_code == 404 and attempt < retries - 1:
+                    log.info("doc %s not ready yet (404), retry %d/%d in %.1fs",
+                             doc_id, attempt + 1, retries, retry_delay)
+                    time.sleep(retry_delay)
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except requests.HTTPError as exc:
+                last_exc = exc
+                if attempt >= retries - 1:
+                    raise
+                time.sleep(retry_delay)
+        raise last_exc  # unreachable, appease linters
 
     def fetch_document_file(self, doc_id: int) -> tuple[bytes, str]:
         """
