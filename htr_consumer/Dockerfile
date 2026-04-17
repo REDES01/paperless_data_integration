@@ -6,12 +6,16 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Install deps first so we get cache layer
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Paths below are relative to the repo root — compose.yml sets
+# `build.context: ..` so this Dockerfile sees the full paperless_data_integration
+# directory, not just htr_consumer/. That lets us reuse region_slicer/ directly
+# without duplicating files.
+
+# Install deps first so we get a cache layer
+COPY htr_consumer/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Vendor the slicer code so we don't duplicate the detection logic
-# (build context is paperless_data_integration/; see compose.yml)
 COPY region_slicer/detector.py   /app/detector.py
 COPY region_slicer/slicer.py     /app/slicer.py
 
