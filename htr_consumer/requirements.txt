@@ -1,0 +1,7 @@
+kafka-python-ng~=2.2.3
+psycopg[binary]~=3.2
+requests~=2.31
+pdf2image>=1.17.0
+Pillow>=10.0
+numpy>=1.24
+minio>=7.2

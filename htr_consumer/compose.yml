@@ -1,0 +1,50 @@
+# HTR preprocessing consumer (Phase 2).
+#
+# Usage (from paperless_data_integration/):
+#
+#   # Get a Paperless API token first (see notebook Step 16):
+#   export PAPERLESS_TOKEN=<token>
+#
+#   # Build + start the service
+#   docker compose -f htr_consumer/compose.yml up -d --build
+#
+#   # Follow the logs
+#   docker compose -f htr_consumer/compose.yml logs -f
+#
+#   # Stop
+#   docker compose -f htr_consumer/compose.yml down
+
+services:
+  htr_consumer:
+    build:
+      context: ..    # paperless_data_integration root, so Dockerfile can COPY region_slicer/*
+      dockerfile: htr_consumer/Dockerfile
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKER: redpanda:9092
+      KAFKA_TOPIC: paperless.uploads
+      KAFKA_GROUP_ID: htr-preprocessing
+
+      FASTAPI_URL: http://fastapi_server:8000
+
+      PAPERLESS_URL: http://paperless-webserver-1:8000
+      PAPERLESS_TOKEN: ${PAPERLESS_TOKEN:?PAPERLESS_TOKEN env var is required}
+
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: paperless_minio
+      MINIO_BUCKET: paperless-images
+
+      ML_DB_HOST: postgres
+      ML_DB_PORT: "5432"
+      ML_DB_NAME: paperless
+      ML_DB_USER: user
+      ML_DB_PASSWORD: paperless_postgres
+
+      LOG_LEVEL: INFO
+    networks:
+      - paperless_ml_net
+
+networks:
+  paperless_ml_net:
+    external: true
