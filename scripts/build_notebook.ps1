@@ -150,13 +150,23 @@ s.execute("cd ~/paperless_data_integration && sg docker -c 'bash scripts/up_pape
 print("Data stack up.")
 '@
 
-    New-MdCell "## Step 12 — Seed demo data into the data-stack Postgres"
+    New-MdCell "## Step 12 — Seed demo data + apply Phase 2 migration"
     New-CodeCell @'
+# Phase 1 demo seed (3 fake regions, 2 fake docs) so the HTR review page
+# has something to show even before Phase 2 processes real uploads.
 s.execute(
     "cat ~/paperless_data_integration/seed/phase1_demo_seed.sql | "
     "sg docker -c 'docker exec -i postgres psql -U user -d paperless'"
 )
-print("Demo seed inserted.")
+print("Phase 1 demo seed inserted.")
+
+# Phase 2 migration: add paperless_doc_id column to the documents table.
+# Idempotent, safe to re-run.
+s.execute(
+    "cat ~/paperless_data_integration/seed/phase2_add_paperless_doc_id.sql | "
+    "sg docker -c 'docker exec -i postgres psql -U user -d paperless'"
+)
+print("Phase 2 migration applied (paperless_doc_id column added).")
 '@
 
     New-MdCell "## Step 13 — Bring up the Paperless stack"
@@ -175,8 +185,6 @@ s.execute("cd ~/paperless_data_integration && sg docker -c 'bash scripts/verify.
 
     New-MdCell "## Step 15 — Create Paperless superuser"
     New-CodeCell @'
-# Create the initial admin account for the Paperless UI.
-# Change the username/password as needed.
 s.execute(
     "sg docker -c 'docker exec paperless-webserver-1 python manage.py shell -c \""
     "from django.contrib.auth.models import User; "
@@ -222,7 +230,7 @@ print("Slicer image built.")
 Uploads two committed sample files from ``sample_documents/``:
 
 - ``sample_budget_memo.pdf`` — 2-page PDF with printed text + simulated handwriting
-- ``sample_scan.jpeg`` — a scanned-image document (tests the slicer's image-file path)
+- ``sample_scan.jpeg`` — a scanned-image document
 
 Paperless processes each upload asynchronously (Tesseract OCR, thumbnail, classification). Expect ~30-60 seconds before the documents are query-able via the API.
 "@
@@ -252,8 +260,6 @@ s.execute(
 
     New-MdCell @"
 ## Step 19 — Capture document IDs for the slicer
-
-After the uploads process, grab the integer IDs Paperless assigned. Use these for the slicer runs below.
 "@
     New-CodeCell @'
 import json
@@ -269,7 +275,6 @@ try:
     print(f"Found {len(docs)} document(s):")
     for doc_id, title in docs:
         print(f"  id={doc_id}  title={title!r}")
-    # Pick the first one as default test target
     DOC_ID = docs[0][0] if docs else 1
     print(f"\nUsing DOC_ID = {DOC_ID} for slicer tests below.")
 except Exception as exc:
@@ -277,7 +282,7 @@ except Exception as exc:
     DOC_ID = 1
 '@
 
-    New-MdCell "---`n# Part 4 — Verify Kafka events (Phase 4)"
+    New-MdCell "---`n# Part 4 — Verify Kafka upload events (Phase 4)"
 
     New-MdCell @"
 ## Step 20 — Check upload events in Redpanda
@@ -285,13 +290,15 @@ except Exception as exc:
 When a document is uploaded, the ``paperless_ml`` Django signal handler publishes a ``paperless.uploads`` event. You should see one event per uploaded sample document.
 "@
     New-CodeCell @'
+# timeout 5: rpk consume stays connected waiting for more messages otherwise.
+# Forcing an exit after 5 seconds prints everything already in the topic and returns.
 s.execute(
     "sg docker -c 'timeout 5 docker exec redpanda rpk topic consume paperless.uploads "
     "--offset start 2>/dev/null; true' || echo 'No events yet'"
 )
 '@
 
-    New-MdCell "---`n# Part 5 — Test the region slicer"
+    New-MdCell "---`n# Part 5 — Manual region slicer test"
 
     New-MdCell @"
 ## Step 21 — Slicer dry run with Tesseract output preview
@@ -310,8 +317,6 @@ s.execute(
 ## Step 22 — Full slicer run with merge_text demo
 
 Runs the full pipeline (detect + crop + upload to MinIO), then demonstrates ``SlicerResult.merge_text()`` with placeholder HTR outputs. This is the ``merged_text`` string that Phase 2 will write to Postgres and Phase 3 will chunk + upsert to Qdrant.
-
-After this, check the MinIO Console at ``http://<floating-ip>:9001`` → ``paperless-images`` bucket → ``documents/{DOC_ID}/regions/`` to see the crop PNG files.
 "@
     New-CodeCell @'
 s.execute(
@@ -321,9 +326,110 @@ s.execute(
 )
 '@
 
-    New-MdCell "---`n# Part 6 — Access URLs"
+    New-MdCell "---`n# Part 6 — HTR preprocessing consumer (Phase 2)"
 
-    New-MdCell "## Step 23 — Print access URLs"
+    New-MdCell @"
+## Step 23 — Start the HTR preprocessing consumer
+
+Long-lived Kafka consumer that automates what Step 22 just did manually:
+
+1. Subscribes to ``paperless.uploads``
+2. For each event, runs the slicer
+3. POSTs each region to serving's ``/predict/htr``
+4. Writes rows into ``documents``, ``document_pages``, ``handwritten_regions``
+
+After this starts, the two sample documents you uploaded will be processed automatically (the consumer uses ``auto_offset_reset=earliest`` so it picks up events from the beginning of the topic).
+
+**Note:** this requires serving's FastAPI to be running on ``paperless_ml_net`` with hostname ``fastapi_server``. If serving isn't up, per-region HTR calls will fail — the consumer logs the error, writes an empty output for that region, and moves on. You'll still see rows in ``documents`` and ``document_pages``, and regions will be created but with empty ``htr_output``.
+"@
+    New-CodeCell @'
+# Build and start the consumer. PAPERLESS_TOKEN is passed in as an env var
+# (read by compose.yml). --build rebuilds if the image is stale.
+s.execute(
+    f"cd ~/paperless_data_integration && "
+    f"PAPERLESS_TOKEN={PAPERLESS_TOKEN} "
+    f"sg docker -c 'docker compose -f htr_consumer/compose.yml up -d --build'"
+)
+print("Consumer starting...")
+
+import time
+time.sleep(10)
+
+# Confirm it's running
+s.execute(
+    "sg docker -c 'docker ps --filter name=htr_consumer --format \"{{.Names}}\\t{{.Status}}\"'"
+)
+'@
+
+    New-MdCell @"
+## Step 24 — Watch the consumer process events
+
+Tails the consumer log. Expect to see:
+- ``Connected to Kafka at redpanda:9092``
+- ``recv offset=0 partition=0 paperless_doc_id=1``
+- slicer output (pages, regions detected)
+- ``HTR region_id=... conf=... flagged=...`` per region (or ``HTR call failed`` if serving is down)
+- ``paperless_doc_id=1 processed in X.XXs``
+"@
+    New-CodeCell @'
+import time
+print("Waiting 45 seconds for consumer to process both sample uploads...")
+time.sleep(45)
+
+s.execute(
+    "sg docker -c 'docker logs htr_consumer-htr_consumer-1 --tail 80'"
+)
+'@
+
+    New-MdCell @"
+## Step 25 — Verify rows in the data-stack Postgres
+
+After the consumer runs, both uploaded documents should exist in the ML ``documents`` table (keyed by ``paperless_doc_id``), with corresponding pages and regions.
+"@
+    New-CodeCell @'
+# Document-level summary
+s.execute(
+    "sg docker -c 'docker exec postgres psql -U user -d paperless -c "
+    "\"SELECT d.paperless_doc_id, d.filename, d.page_count, "
+    "LENGTH(d.tesseract_text) AS tesseract_chars, "
+    "LENGTH(d.htr_text) AS htr_chars, "
+    "LENGTH(d.merged_text) AS merged_chars, "
+    "(SELECT COUNT(*) FROM document_pages WHERE document_id = d.id) AS pages, "
+    "(SELECT COUNT(*) FROM handwritten_regions WHERE page_id IN "
+    "(SELECT id FROM document_pages WHERE document_id = d.id)) AS regions "
+    "FROM documents d "
+    "WHERE d.paperless_doc_id IS NOT NULL "
+    "ORDER BY d.uploaded_at DESC;\"'"
+)
+'@
+
+    New-MdCell @"
+## Step 26 — Upload a third document to test the live pipeline
+
+Uploads the PDF a second time (Paperless creates a duplicate with a new integer ID). Watch the consumer pick it up in real time.
+"@
+    New-CodeCell @'
+# Upload once more — Paperless will assign a new integer ID
+r = s.execute(
+    f"curl -s -X POST http://localhost:8000/api/documents/post_document/ "
+    f"-H \"Authorization: Token {PAPERLESS_TOKEN}\" "
+    f"-F \"document=@/home/cc/paperless_data_integration/sample_documents/sample_budget_memo.pdf\" "
+    f"-F \"title=sample_budget_memo_live_test\""
+)
+
+print("\nWaiting 45 seconds for the full pipeline (event -> slice -> HTR -> DB)...")
+import time
+time.sleep(45)
+
+# Show the last 40 lines of consumer log for the newest event
+s.execute(
+    "sg docker -c 'docker logs htr_consumer-htr_consumer-1 --tail 40'"
+)
+'@
+
+    New-MdCell "---`n# Part 7 — Access URLs"
+
+    New-MdCell "## Step 27 — Print access URLs"
     New-CodeCell @'
 s.refresh()
 addresses = s.addresses
