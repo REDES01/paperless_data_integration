@@ -63,7 +63,6 @@ def _build_consumer() -> KafkaConsumer:
                 auto_offset_reset="earliest",  # process any events we missed
                 enable_auto_commit=False,
                 value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-                consumer_timeout_ms=0,   # block forever in poll loop
             )
             log.info("Connected to Kafka at %s, topic=%s, group=%s", broker, topic, group)
             return c
