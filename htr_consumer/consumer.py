@@ -15,6 +15,7 @@ Environment variables:
   KAFKA_TOPIC         default: paperless.uploads
   KAFKA_GROUP_ID      default: htr-preprocessing
   FASTAPI_URL         default: http://fastapi_server:8000
+  HTR_ENDPOINT        default: /predict/htr (paperless-ml's ml-gateway uses /htr)
   PAPERLESS_URL       default: http://paperless-webserver-1:8000
   PAPERLESS_TOKEN     (required at runtime for the slicer to fetch documents)
   MINIO_ENDPOINT      default: minio:9000

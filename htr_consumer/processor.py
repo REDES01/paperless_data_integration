@@ -30,8 +30,9 @@ import db
 log = logging.getLogger(__name__)
 
 
-FASTAPI_URL  = os.environ.get("FASTAPI_URL", "http://fastapi_server:8000").rstrip("/")
-HTR_TIMEOUT  = int(os.environ.get("HTR_TIMEOUT_SECONDS", "30"))
+FASTAPI_URL   = os.environ.get("FASTAPI_URL", "http://fastapi_server:8000").rstrip("/")
+HTR_ENDPOINT  = "/" + os.environ.get("HTR_ENDPOINT", "/predict/htr").lstrip("/")
+HTR_TIMEOUT   = int(os.environ.get("HTR_TIMEOUT_SECONDS", "30"))
 
 
 def _call_htr(
@@ -63,9 +64,9 @@ def _call_htr(
         "source":        source,
         "uploaded_at":   uploaded_at,
     }
-    log.debug("POST %s/predict/htr region_id=%s", FASTAPI_URL, region_id)
+    log.debug("POST %s%s region_id=%s", FASTAPI_URL, HTR_ENDPOINT, region_id)
     resp = requests.post(
-        f"{FASTAPI_URL}/predict/htr",
+        f"{FASTAPI_URL}{HTR_ENDPOINT}",
         json=payload,
         timeout=HTR_TIMEOUT,
     )
