@@ -35,6 +35,25 @@ FASTAPI_URL   = os.environ.get("FASTAPI_URL", "http://fastapi_server:8000").rstr
 HTR_ENDPOINT  = "/" + os.environ.get("HTR_ENDPOINT", "/predict/htr").lstrip("/")
 HTR_TIMEOUT   = int(os.environ.get("HTR_TIMEOUT_SECONDS", "30"))
 
+# Drift monitor is optional — fire-and-forget POST per region. Empty URL
+# disables the integration (tests, dev without the monitor running).
+DRIFT_URL     = os.environ.get("DRIFT_MONITOR_URL", "").rstrip("/")
+DRIFT_TIMEOUT = float(os.environ.get("DRIFT_MONITOR_TIMEOUT_SECONDS", "2.0"))
+
+
+def _post_drift_async(crop_s3_url: str) -> None:
+    """POST to drift monitor; log warning on failure, never raise."""
+    if not DRIFT_URL:
+        return
+    try:
+        requests.post(
+            f"{DRIFT_URL}/drift/check",
+            json={"crop_s3_url": crop_s3_url},
+            timeout=DRIFT_TIMEOUT,
+        )
+    except Exception as exc:
+        log.debug("drift check post failed for %s: %s", crop_s3_url, exc)
+
 
 def _call_htr(
     document_id: str,
@@ -160,6 +179,7 @@ def process_event(event: dict, slicer: RegionSlicer) -> None:
                 uploaded_at=uploaded_at,
             )
             htr_responses.append((page_uuid, region_uuid, sr, r))
+            _post_drift_async(sr.crop_s3_url)
             log.info(
                 "  HTR region_id=%s conf=%.3f flagged=%s output=%r",
                 region_uuid,

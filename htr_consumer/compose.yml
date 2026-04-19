@@ -62,6 +62,10 @@ services:
       ML_DB_USER: user
       ML_DB_PASSWORD: paperless_postgres
 
+      # Drift monitor — fire-and-forget POST per region. Leave blank to disable.
+      DRIFT_MONITOR_URL: http://drift_monitor:8000
+      DRIFT_MONITOR_TIMEOUT_SECONDS: "2.0"
+
       LOG_LEVEL: INFO
     networks:
       - paperless_ml_net          # reach paperless-ml services
