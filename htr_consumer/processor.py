@@ -4,7 +4,8 @@ preprocessing pipeline against it.
 
   1. Slice the Paperless document into handwritten region crops (via slicer.py,
      which also pulls Tesseract output from Paperless's REST API).
-  2. For each region, POST to /predict/htr with the documented schema, get back
+  2. For each region, POST to the configured HTR endpoint (see HTR_ENDPOINT env
+     var; defaults to /predict/htr) with the documented schema, get back
      {htr_output, htr_confidence, htr_flagged}.
   3. Call SlicerResult.merge_text() to build the merged_text string.
   4. Write rows into the data-stack Postgres:
@@ -46,7 +47,8 @@ def _call_htr(
     uploaded_at: str,
 ) -> dict:
     """
-    POST to serving's /predict/htr with the data-team's documented contract
+    POST to serving's HTR endpoint (FASTAPI_URL + HTR_ENDPOINT; defaults to
+    /predict/htr) with the data-team's documented contract
     (htr_input_sample.json). Returns the parsed response dict:
       {region_id, htr_output, htr_confidence, htr_flagged,
        model_version, inference_time_ms}
@@ -94,10 +96,10 @@ def process_event(event: dict, slicer: RegionSlicer) -> None:
     )
 
     # 2. Pre-allocate IDs by writing the documents row first. We need the ML-side
-    #    UUID (documents.id) to pass to /predict/htr per the sample contract, AND
-    #    we need page UUIDs per region. So: do one DB transaction that creates the
-    #    documents + pages + (blank) regions, then call HTR, then a second txn to
-    #    fill in the HTR outputs.
+    #    UUID (documents.id) to pass to the HTR endpoint per the sample contract,
+    #    AND we need page UUIDs per region. So: do one DB transaction that creates
+    #    the documents + pages + (blank) regions, then call HTR, then a second
+    #    txn to fill in the HTR outputs.
     htr_text_all = ""   # updated after HTR
     merged_text  = result.tesseract_text or ""
     
@@ -142,7 +144,7 @@ def process_event(event: dict, slicer: RegionSlicer) -> None:
                 )
                 region_placeholders.append((page_uuid, region_uuid, sr))
 
-    # 3. Call /predict/htr for each region. Serving fetches crops from MinIO
+    # 3. Call the HTR endpoint for each region. Serving fetches crops from MinIO
     #    itself (via crop_s3_url), so we don't send image bytes.
     htr_responses = []
     for page_uuid, region_uuid, sr in region_placeholders:
