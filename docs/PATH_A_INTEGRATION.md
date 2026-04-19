@@ -1,6 +1,6 @@
 # Path A integration with `paperless-ml`
 
-This branch connects `paperless_data_integration`'s `htr_consumer` to the
+This integration connects `paperless_data_integration`'s `htr_consumer` to the
 integrated Paperless + ML serving stack at
 [`Palomarr/paperless-ml`](https://github.com/Palomarr/paperless-ml)
 (branch `paperless-integration`), while keeping
