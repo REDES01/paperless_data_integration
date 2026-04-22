@@ -1,0 +1,48 @@
+# Fine-tune TrOCR-base-stage1 on IAM handwriting.
+#
+# Why this config:
+#   - Base model: trocr-base-stage1. Pretrained on synthetic printed text
+#     only, so IAM handwriting is genuinely out-of-distribution. Real
+#     signal for fine-tuning, real room to improve.
+#   - 1000 examples × 2 epochs × batch 4 ≈ 500 gradient steps. Big enough
+#     to adapt to the new domain, small enough to finish on CPU overnight.
+#   - freeze_encoder: false — the encoder was trained on printed text and
+#     needs to learn handwriting-specific visual features. Freezing would
+#     defeat the purpose.
+#   - LR 3e-5, warmup 100: standard HF TrOCR fine-tune recipe. Smaller
+#     than the old config's 5e-5 because we're training more steps
+#     (more chance to overshoot without warmup).
+#
+# Expected outcome:
+#   - Baseline stage1 CER on IAM: ~0.3-0.6 (model has never seen handwriting)
+#   - Post-fine-tune CER: ~0.10-0.20 (substantial real improvement)
+#   - Gate with tolerance 1.05: registers as htr/v{N}
+#
+# Runtime: ~1.5-2 hours on CPU. Run overnight or during a meeting.
+
+run_name: finetune_iam_stage1
+role: finetune
+
+training_sources: [iam]
+max_train_examples: 1000
+max_val_examples: 200
+iam_split: train
+
+base_model: microsoft/trocr-base-stage1
+
+epochs: 2
+batch_size: 4
+learning_rate: 3.0e-5
+weight_decay: 0.01
+warmup_steps: 100
+max_new_tokens: 128
+
+freeze_encoder: false
+
+device: cpu
+eval_batch_size: 4
+seed: 42
+
+gate_tolerance: 1.05
+register_on_pass: true
+register_name: htr
