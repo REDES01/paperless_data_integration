@@ -104,6 +104,10 @@ class RunConfig:
     register_on_pass: bool = True
     register_name: str = "htr"
 
+    # Memory / stability knobs
+    freeze_encoder: bool = True           # freeze ViT; only train decoder
+    gradient_checkpointing: bool = True   # trade compute for memory
+
 
 def load_config(path: str) -> RunConfig:
     with open(path, "r", encoding="utf-8") as f:
@@ -226,13 +230,33 @@ def finetune(
     from torch.optim import AdamW
 
     device = torch.device(config.device)
+
+    # Freeze encoder to halve trainable params (standard practice for
+    # TrOCR fine-tuning on small data). Halves gradient + optimizer memory.
+    if config.freeze_encoder:
+        for p in model.encoder.parameters():
+            p.requires_grad = False
+        n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        n_total = sum(p.numel() for p in model.parameters())
+        log.info("encoder frozen: trainable=%.1fM / total=%.1fM params",
+                 n_trainable / 1e6, n_total / 1e6)
+
+    # Gradient checkpointing: recomputes forward activations during backward
+    # instead of holding them all. ~30% slower, ~40% less memory.
+    if config.gradient_checkpointing:
+        try:
+            model.gradient_checkpointing_enable()
+            log.info("gradient checkpointing enabled")
+        except Exception as exc:
+            log.warning("gradient checkpointing unavailable: %s", exc)
+
     model.to(device)
     model.train()
 
     dataset = _make_torch_dataset(examples, processor, config.max_new_tokens)
     loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
     optimizer = AdamW(
-        model.parameters(),
+        [p for p in model.parameters() if p.requires_grad],
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
     )
