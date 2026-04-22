@@ -1,25 +1,22 @@
 # Fine-tune TrOCR-base-printed on IAM + user corrections combined.
-# In a mature production deployment this is the preferred candidate.
-#
-# On a fresh system, IAM loads fine, corrections return [], so this
-# behaves like finetune_iam (slightly different training config values).
+# Same beefed-up training budget as finetune_iam.
 
 run_name: finetune_combined
 role: finetune
 
 training_sources: [iam, corrections]
 snapshot_version: latest
-max_train_examples: 150
+max_train_examples: 400          # 400 per source; 400 total when corrections empty
 max_val_examples: 100
 iam_split: train
 
 base_model: microsoft/trocr-base-printed
 
-epochs: 1
+epochs: 2
 batch_size: 2
 learning_rate: 5.0e-5
 weight_decay: 0.01
-warmup_steps: 20
+warmup_steps: 50
 max_new_tokens: 128
 
 device: cpu

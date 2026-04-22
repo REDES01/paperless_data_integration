@@ -1,28 +1,24 @@
 # Fine-tune TrOCR-base-printed on IAM handwriting.
 #
-# This is now a REAL adaptation task: the printed-text base model has never
-# seen handwriting (trained on SROIE receipts), so IAM is genuinely
-# out-of-distribution. Fine-tuning should substantially reduce CER.
-#
-# Aggressive LR (5e-5) is appropriate here because we actually need the
-# model to learn — unlike when fine-tuning an already-optimal checkpoint.
-# 200 IAM training examples, batch 2, 1 epoch, CPU: ~20 min.
+# Prior config (200 ex × 1 epoch = 100 steps) got the loss from 10.5 -> 4.1
+# but didn't converge enough to beat baseline (CER 1.29 vs baseline 0.81).
+# This config gives the model ~5x more training signal.
 
 run_name: finetune_iam
 role: finetune
 
 training_sources: [iam]
-max_train_examples: 200
+max_train_examples: 500          # up from 200
 max_val_examples: 100
 iam_split: train
 
 base_model: microsoft/trocr-base-printed
 
-epochs: 1
+epochs: 2                         # up from 1  (2 epochs × 500/2 = 500 steps)
 batch_size: 2
 learning_rate: 5.0e-5
 weight_decay: 0.01
-warmup_steps: 20
+warmup_steps: 50                  # ~10% of 500 total steps
 max_new_tokens: 128
 
 device: cpu
