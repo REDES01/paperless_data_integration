@@ -317,6 +317,18 @@ def run(config: RunConfig) -> int:
     processor = TrOCRProcessor.from_pretrained(config.base_model)
     model = VisionEncoderDecoderModel.from_pretrained(config.base_model)
 
+    # TrOCR training needs these explicit config settings. The pretrained
+    # checkpoint has them in `generation_config` (for inference) but NOT in
+    # `config` (which is what the training forward pass reads). Without these
+    # the model raises: "set the decoder_start_token_id attribute..."
+    # This is the standard HuggingFace recommendation for TrOCR fine-tuning.
+    model.config.decoder_start_token_id = processor.tokenizer.cls_token_id
+    model.config.pad_token_id = processor.tokenizer.pad_token_id
+    model.config.vocab_size = model.config.decoder.vocab_size
+    # Also limit generation so eval doesn't go forever on edge cases
+    model.config.max_length = config.max_new_tokens
+    model.config.num_beams = 1   # greedy decode for speed + determinism
+
     # Load training + val data
     mc = _minio()
     val_examples = load_iam_examples(
