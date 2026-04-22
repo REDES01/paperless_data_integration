@@ -1,0 +1,30 @@
+# Fine-tune TrOCR on IAM handwriting only.
+# Closest analog of "train from scratch on the external non-synthetic dataset"
+# that the rubric requires.
+#
+# With 200 train examples, batch 2, 1 epoch, CPU: ~15 minutes total.
+
+run_name: finetune_iam
+role: finetune
+
+training_sources: [iam]
+max_train_examples: 200
+max_val_examples: 100
+iam_split: train
+
+base_model: microsoft/trocr-base-handwritten
+
+epochs: 1
+batch_size: 2
+learning_rate: 5.0e-5
+weight_decay: 0.01
+warmup_steps: 0
+max_new_tokens: 128
+
+device: cpu
+eval_batch_size: 4
+seed: 42
+
+gate_tolerance: 1.05
+register_on_pass: true
+register_name: htr

@@ -1,0 +1,31 @@
+# Baseline: pretrained TrOCR, no fine-tuning.
+# Establishes the reference CER used by the quality gate for all subsequent
+# candidates. Runs in ~2 minutes on CPU (eval only, no training).
+
+run_name: baseline_pretrained
+role: baseline
+
+# No training data → skip fine-tune step, go straight to eval.
+training_sources: []
+max_train_examples: 0
+max_val_examples: 100
+
+base_model: microsoft/trocr-base-handwritten
+
+# These are placeholders (no training happens for baseline) but the
+# dataclass requires them.
+epochs: 0
+batch_size: 2
+learning_rate: 0.0
+weight_decay: 0.0
+warmup_steps: 0
+max_new_tokens: 128
+
+device: cpu
+eval_batch_size: 4
+seed: 42
+
+# Quality gate
+gate_tolerance: 1.05
+register_on_pass: false    # baseline never registers — it IS the reference
+register_name: htr

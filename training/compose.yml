@@ -1,0 +1,46 @@
+# Trainer compose — one-shot containers.
+#
+# Usage:
+#   # Run baseline first (required before any fine-tune candidate):
+#   docker compose -f training/compose.yml run --rm baseline
+#
+#   # Then run each fine-tune candidate:
+#   docker compose -f training/compose.yml run --rm finetune_iam
+#   docker compose -f training/compose.yml run --rm finetune_corrections
+#   docker compose -f training/compose.yml run --rm finetune_combined
+#
+# Convenience: scripts/run_all_candidates.sh runs all four in sequence.
+
+services:
+  _base: &training_base
+    build:
+      context: ..
+      dockerfile: training/Dockerfile
+    image: htr_trainer:latest
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: paperless_minio
+    networks:
+      - paperless_ml_net
+
+  baseline:
+    <<: *training_base
+    command: ["--config", "/app/configs/baseline.yaml"]
+
+  finetune_iam:
+    <<: *training_base
+    command: ["--config", "/app/configs/finetune_iam.yaml"]
+
+  finetune_corrections:
+    <<: *training_base
+    command: ["--config", "/app/configs/finetune_corrections.yaml"]
+
+  finetune_combined:
+    <<: *training_base
+    command: ["--config", "/app/configs/finetune_combined.yaml"]
+
+networks:
+  paperless_ml_net:
+    external: true
