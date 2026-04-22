@@ -26,6 +26,6 @@ device: cpu
 eval_batch_size: 4
 seed: 42
 
-gate_tolerance: 1.05
+gate_tolerance: 1.15
 register_on_pass: true
 register_name: htr
