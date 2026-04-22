@@ -296,19 +296,38 @@ def predict_htr(req: HtrRequest):
 # ── Semantic search endpoint ───────────────────────────────────────
 
 class SearchRequest(BaseModel):
-    query: str
+    # Dual contract: accept both the ml_gateway-native shape (query, k)
+    # and the frontend/Yikai shape (query_text, top_k, session_id, user_id).
+    # Whichever the caller sends, we normalise to query+k internally.
+    query: str | None = None
+    query_text: str | None = None
     k: int = 10
+    top_k: int | None = None
+    session_id: str | None = None
+    user_id: str | None = None
+
+    model_config = {"extra": "allow"}
+
+    @property
+    def effective_query(self) -> str:
+        return (self.query or self.query_text or "").strip()
+
+    @property
+    def effective_k(self) -> int:
+        return self.top_k if self.top_k is not None else self.k
 
 
 @app.post("/predict/search")
 def predict_search(req: SearchRequest):
     t0 = time.time()
-    if not req.query.strip():
+    query = req.effective_query
+    k = req.effective_k
+    if not query:
         search_requests_total.labels(status="empty_query").inc()
         raise HTTPException(status_code=400, detail="empty query")
 
     try:
-        vec = state.retrieval_model.encode(req.query, normalize_embeddings=True).tolist()
+        vec = state.retrieval_model.encode(query, normalize_embeddings=True).tolist()
     except Exception as exc:
         log.exception("embed error: %s", exc)
         search_requests_total.labels(status="embed_error").inc()
@@ -318,7 +337,7 @@ def predict_search(req: SearchRequest):
         hits = state.qdrant.search(
             collection_name=QDRANT_COLLECTION,
             query_vector=vec,
-            limit=req.k,
+            limit=k,
         )
     except Exception as exc:
         log.warning("qdrant search error: %s", exc)
@@ -326,15 +345,32 @@ def predict_search(req: SearchRequest):
         raise HTTPException(status_code=502, detail="qdrant error") from exc
 
     results = []
-    for h in hits:
+    for i, h in enumerate(hits):
         payload = h.payload or {}
+        snippet = payload.get("snippet", "")
+        score = float(h.score)
+        # Each result carries both field-name variants so either contract works.
         results.append({
-            "document_id": payload.get("document_id", ""),
-            "paperless_doc_id": payload.get("paperless_doc_id"),
-            "snippet": payload.get("snippet", ""),
-            "score": float(h.score),
+            "document_id":       payload.get("document_id", ""),
+            "paperless_doc_id":  payload.get("paperless_doc_id"),
+            "chunk_index":       payload.get("chunk_index", i),
+            "chunk_text":        snippet,
+            "snippet":           snippet,           # legacy alias
+            "similarity_score":  score,
+            "score":             score,             # legacy alias
         })
 
+    elapsed_ms = int((time.time() - t0) * 1000)
     search_requests_total.labels(status="ok").inc()
     search_latency.observe(time.time() - t0)
-    return {"query": req.query, "results": results, "took_ms": int((time.time() - t0) * 1000)}
+    return {
+        # Dual contract fields so both frontend and ml_gateway clients work.
+        "query":               query,
+        "query_text":          query,
+        "session_id":          req.session_id,
+        "results":             results,
+        "fallback_to_keyword": False,
+        "model_version":       getattr(state, "retrieval_version", "mpnet-base-v2"),
+        "took_ms":             elapsed_ms,
+        "inference_time_ms":   elapsed_ms,
+    }
