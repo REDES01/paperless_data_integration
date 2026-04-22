@@ -12,3 +12,6 @@ paperless/docker-compose.env
 
 # Jupyter
 .ipynb_checkpoints/
+
+__pycache__/
+*.pyc

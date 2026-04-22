@@ -37,6 +37,8 @@ import logging
 import os
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -159,26 +161,62 @@ def _fetch_and_preprocess(mc: Minio, crop_s3_url: str) -> np.ndarray:
 app = FastAPI(title="Drift Monitor", version="1.0")
 
 
-@app.on_event("startup")
-def _startup() -> None:
+DETECTOR_RETRY_SECONDS = int(os.environ.get("DRIFT_RETRY_SECONDS", "60"))
+
+
+def _try_load_detector() -> bool:
+    """One attempt at loading the detector from MinIO. Returns True on success.
+
+    Non-fatal: logs warnings on failure. Caller decides whether to retry.
+    """
     from alibi_detect.saving import load_detector    # lazy import: heavy
 
+    try:
+        if state.minio is None:
+            state.minio = _get_minio()
+        tmpdir = Path(tempfile.mkdtemp(prefix="drift_cd_"))
+        detector_dir = _download_detector_dir(state.minio, tmpdir)
+        state.detector = load_detector(str(detector_dir))
+        log.info("detector loaded successfully")
+        return True
+    except Exception as exc:
+        log.warning("detector load failed (will retry in %ds): %s",
+                    DETECTOR_RETRY_SECONDS, exc)
+        return False
+
+
+def _retry_loop() -> None:
+    """Background thread: poll MinIO until the detector loads successfully."""
+    while state.detector is None:
+        time.sleep(DETECTOR_RETRY_SECONDS)
+        log.info("retrying detector load...")
+        if _try_load_detector():
+            return
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    """
+    Non-fatal startup. If the detector is missing (reference not yet built),
+    the service comes up with detector=None and retries in the background.
+    /health reports 503 until the detector is loaded; /drift/check returns 503.
+    Once the detector loads, the service becomes healthy automatically.
+    """
     log.info("starting drift monitor")
     log.info("  MinIO endpoint:   %s", MINIO_ENDPOINT)
     log.info("  reference path:   s3://%s/%s", REF_BUCKET, REF_PREFIX)
     log.info("  crop shape:       %sx%s (HxW)", CROP_HEIGHT, CROP_WIDTH)
 
-    try:
-        state.minio = _get_minio()
-        tmpdir = Path(tempfile.mkdtemp(prefix="drift_cd_"))
-        detector_dir = _download_detector_dir(state.minio, tmpdir)
-        state.detector = load_detector(str(detector_dir))
-        log.info("detector loaded successfully")
-    except Exception as exc:
-        log.exception("detector load failed: %s", exc)
-        # Exit so docker-compose restarts us; a silent half-loaded drift
-        # monitor is worse than a failing one.
-        sys.exit(1)
+    if _try_load_detector():
+        return
+
+    # Not fatal — spawn a background retry thread so we become healthy as soon
+    # as the reference appears in MinIO (typically right after
+    # build_drift_reference.py runs).
+    log.info("detector not yet available; starting background retry loop "
+             "(every %ds)", DETECTOR_RETRY_SECONDS)
+    t = threading.Thread(target=_retry_loop, name="drift-retry", daemon=True)
+    t.start()
 
 
 @app.get("/health")
