@@ -17,7 +17,13 @@
 # Health:    http://<vm>:8080/health
 
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.10.4
+  # Build a small custom image that pre-installs apache-airflow-providers-docker
+  # at build time (5 sec), instead of doing it at container start every boot
+  # via _PIP_ADDITIONAL_REQUIREMENTS (flaky — crash-looped the webserver).
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: paperless-airflow:2.10.4
   # Run as root inside the container so the docker socket mount is usable.
   # Single-tenant demo VM — acceptable posture. For multi-tenant, swap to
   # uid 50000 and add airflow user to the docker group.
@@ -31,9 +37,6 @@ x-airflow-common: &airflow-common
     AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
     AIRFLOW__WEBSERVER__WORKERS: "2"
-    # Install the docker provider at container start so DockerOperator works
-    # without needing a custom image. Keeps this compose self-contained.
-    _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-docker"
   volumes:
     - ./dags:/opt/airflow/dags
     - airflow_logs:/opt/airflow/logs

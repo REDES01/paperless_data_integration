@@ -5,9 +5,9 @@
 #   - paperless_ml_net docker network exists (scripts/create_network.sh)
 #   - htr_trainer:latest image is built (triggered by training/compose.yml)
 #
-# First boot takes ~3-5 min because apache-airflow-providers-docker is pip
-# installed on each container start (_PIP_ADDITIONAL_REQUIREMENTS). Subsequent
-# boots are faster (~30s) because the provider wheel is cached.
+# First boot builds paperless-airflow:2.10.4 (extends apache/airflow:2.10.4 with
+# apache-airflow-providers-docker pre-installed). Takes ~30s. Subsequent boots
+# are instant (image cached).
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,8 +20,7 @@ if [[ ! -f "${COMPOSE}" ]]; then
     exit 1
 fi
 
-# Airflow needs ./logs and ./plugins dirs to exist with airflow user perms.
-# We run as root in-container (user: 0:0) so permissions are permissive.
+# Airflow needs ./logs and ./plugins dirs to exist
 mkdir -p "${REPO_ROOT}/airflow/dags"
 mkdir -p "${REPO_ROOT}/airflow/logs"
 mkdir -p "${REPO_ROOT}/airflow/plugins"
@@ -35,9 +34,12 @@ else
 fi
 
 echo ""
+echo "Building paperless-airflow:2.10.4 (apache/airflow + docker provider)..."
+docker compose -p airflow -f "${COMPOSE}" build
+
+echo ""
 echo "Bringing up Airflow (airflow-postgres, airflow-init, airflow-webserver, airflow-scheduler)..."
 docker compose -p airflow -f "${COMPOSE}" up -d airflow-postgres
-# Wait for postgres
 for i in $(seq 1 20); do
     if docker compose -p airflow -f "${COMPOSE}" ps airflow-postgres 2>&1 | grep -q "healthy"; then
         echo "  airflow-postgres healthy"
@@ -46,10 +48,9 @@ for i in $(seq 1 20); do
     sleep 2
 done
 
-# airflow-init is a one-shot — block on its completion
+# airflow-init is a one-shot — block on completion
 docker compose -p airflow -f "${COMPOSE}" up airflow-init
 
-# Now start the long-running services
 docker compose -p airflow -f "${COMPOSE}" up -d airflow-webserver airflow-scheduler
 
 echo ""
@@ -57,7 +58,7 @@ echo "Airflow services:"
 docker compose -p airflow -f "${COMPOSE}" ps
 
 echo ""
-echo "Wait ~90s for the webserver to finish installing apache-airflow-providers-docker..."
+echo "Waiting for webserver health..."
 for i in $(seq 1 30); do
     if curl -sf -m 3 http://localhost:8080/health >/dev/null 2>&1; then
         echo "  webserver ready (took ~$((i*3))s)"
@@ -71,8 +72,4 @@ echo "Airflow ready. UI: http://$(hostname -I | awk '{print $1}'):8080"
 echo "Login:            admin / admin"
 echo ""
 echo "DAG:    htr_retraining"
-echo "Trigger:  click Play icon in the UI, or"
-echo "          curl -u admin:admin -X POST \\"
-echo "              http://localhost:8080/api/v1/dags/htr_retraining/dagRuns \\"
-echo "              -H 'Content-Type: application/json' \\"
-echo "              -d '{\"conf\":{}}'"
+echo "Trigger:  click Play icon in the UI"
