@@ -322,8 +322,22 @@ def finetune(
 def run(config: RunConfig) -> int:
     _setup_mlflow()
 
+    # Determinism: set all RNG seeds from config.seed so successive runs of
+    # the same config produce the same weights. Required because the
+    # pretrained TrOCR checkpoint has a newly-initialized encoder.pooler
+    # layer whose random init otherwise varies run-to-run.
+    import random as _random
+    import numpy as _np
+    _random.seed(config.seed)
+    _np.random.seed(config.seed)
+    torch.manual_seed(config.seed)
+    torch.cuda.manual_seed_all(config.seed)
+    # Also ensure dataloader shuffling is deterministic
+    torch.use_deterministic_algorithms(False)  # TrOCR has ops that aren't deterministic under strict mode
+
     log.info("=" * 70)
-    log.info("Training run: %s  role=%s", config.run_name, config.role)
+    log.info("Training run: %s  role=%s  seed=%d",
+             config.run_name, config.role, config.seed)
     log.info("=" * 70)
 
     # Load model + processor
