@@ -1,19 +1,28 @@
-# Baseline: pretrained TrOCR, no fine-tuning.
-# Establishes the reference CER used by the quality gate for all subsequent
-# candidates. Runs in ~2 minutes on CPU (eval only, no training).
+# Baseline: pretrained TrOCR-base-printed, no fine-tuning.
+#
+# Model choice rationale:
+# We use trocr-base-PRINTED (not trocr-base-handwritten) as the baseline.
+# The handwritten variant was trained on IAM, which is our eval set — it's
+# already at ceiling and fine-tuning can only perturb. The printed variant
+# was trained on SROIE (receipts) so IAM handwriting is genuinely
+# out-of-distribution for it. This gives fine-tuning real signal to learn
+# from and the quality gate something meaningful to approve/reject.
+#
+# Also matches a realistic production scenario: start with a general-purpose
+# text recognizer, specialize via user corrections.
+#
+# Runs in ~2 minutes on CPU (eval only).
 
 run_name: baseline_pretrained
 role: baseline
 
-# No training data → skip fine-tune step, go straight to eval.
 training_sources: []
 max_train_examples: 0
 max_val_examples: 100
 
-base_model: microsoft/trocr-base-handwritten
+base_model: microsoft/trocr-base-printed
 
-# These are placeholders (no training happens for baseline) but the
-# dataclass requires them.
+# Placeholders — no training for baseline
 epochs: 0
 batch_size: 2
 learning_rate: 0.0
@@ -25,7 +34,6 @@ device: cpu
 eval_batch_size: 4
 seed: 42
 
-# Quality gate
 gate_tolerance: 1.05
-register_on_pass: false    # baseline never registers — it IS the reference
+register_on_pass: false
 register_name: htr

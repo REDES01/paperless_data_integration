@@ -1,11 +1,9 @@
-# Fine-tune TrOCR on user corrections only.
-# Demonstrates the CORE RETRAINING LOOP: user correction → versioned
-# snapshot → training → quality gate → registry.
+# Fine-tune TrOCR-base-printed on user corrections only.
+# Core retraining loop: user correction → snapshot → training → gate.
 #
-# On a fresh system with no corrections yet, the snapshot loader returns
-# an empty list. The trainer's role=finetune check then fails the gate
-# with reason "no training data loaded" — which is the CORRECT behavior.
-# (We should not register a model that saw zero training examples.)
+# On a fresh system (no user corrections yet), this degrades to FAIL gate
+# with reason "no training data loaded" — which is correct behavior.
+# Do not register a model that saw zero examples.
 
 run_name: finetune_corrections
 role: finetune
@@ -15,11 +13,11 @@ snapshot_version: latest
 max_train_examples: 200
 max_val_examples: 100
 
-base_model: microsoft/trocr-base-handwritten
+base_model: microsoft/trocr-base-printed
 
 epochs: 1
 batch_size: 2
-learning_rate: 1.0e-6        # gentle LR matching finetune_iam
+learning_rate: 5.0e-5
 weight_decay: 0.01
 warmup_steps: 20
 max_new_tokens: 128
