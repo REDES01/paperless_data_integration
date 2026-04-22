@@ -8,6 +8,13 @@ services:
     networks:
       - default
       - paperless_ml_net
+    environment:
+      # Django's /ml-api/<path> proxy (paperless_ml/views.py::ml_serving_proxy)
+      # forwards to PAPERLESS_ML_SERVING_URL. That target is the IN-CONTAINER
+      # port ml_gateway listens on (8000), accessed over the shared docker
+      # network by service name. The 8100 published on the VM's localhost
+      # is only for host-side curl tests, NOT for container-to-container.
+      PAPERLESS_ML_SERVING_URL: http://ml_gateway:8000
   db:
     networks:
       - default
