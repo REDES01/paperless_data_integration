@@ -157,6 +157,9 @@ def load_correction_examples(
     """
     if version == "latest":
         version = _resolve_latest_snapshot(mc, bucket, prefix)
+        if version is None:
+            log.warning("no snapshot available (fresh system, no corrections yet)")
+            return []
         log.info("resolved 'latest' snapshot: %s", version)
 
     shard_prefix = f"{prefix}/{version}/{split}"
@@ -198,18 +201,30 @@ def load_correction_examples(
     return examples
 
 
-def _resolve_latest_snapshot(mc: Minio, bucket: str, prefix: str) -> str:
-    """Find the most recent v_<timestamp> directory under prefix/."""
+def _resolve_latest_snapshot(mc: Minio, bucket: str, prefix: str) -> str | None:
+    """
+    Find the most recent v_<timestamp> directory under prefix/.
+
+    Returns None if no snapshot exists (fresh system, no corrections yet).
+    Callers should treat None as "no training data available" and degrade
+    gracefully — the trainer then fails the quality gate, which is the
+    correct behavior for a fine-tune candidate with zero training data.
+    """
     versions = set()
-    for obj in mc.list_objects(bucket, prefix=prefix.rstrip("/") + "/", recursive=True):
-        parts = obj.object_name.split("/")
-        # expect .../htr_training/v_<ts>/<split>/<file>.parquet
-        for part in parts:
-            if part.startswith("v_"):
-                versions.add(part)
-                break
+    try:
+        for obj in mc.list_objects(bucket, prefix=prefix.rstrip("/") + "/", recursive=True):
+            parts = obj.object_name.split("/")
+            # expect .../htr_training/v_<ts>/<split>/<file>.parquet
+            for part in parts:
+                if part.startswith("v_"):
+                    versions.add(part)
+                    break
+    except Exception as exc:
+        log.warning("snapshot listing failed at s3://%s/%s/: %s", bucket, prefix, exc)
+        return None
     if not versions:
-        raise RuntimeError(f"no snapshots under s3://{bucket}/{prefix}/")
+        log.warning("no snapshots under s3://%s/%s/ — caller should degrade", bucket, prefix)
+        return None
     return sorted(versions)[-1]
 
 

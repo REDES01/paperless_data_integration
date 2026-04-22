@@ -362,6 +362,16 @@ def run(config: RunConfig) -> int:
         if config.role == "baseline":
             gate_passed = True
             gate_reason = "baseline run — sets reference CER"
+        elif config.role == "finetune" and not train_examples:
+            # Role says "finetune" but we loaded zero training examples.
+            # This happens when `corrections` is requested on a fresh system.
+            # DO NOT register a model that's secretly just the baseline.
+            gate_passed = False
+            gate_reason = (
+                f"no training data loaded for sources={config.training_sources}; "
+                f"skipping registration (this is correct — we should not register "
+                f"a fine-tune candidate that saw zero examples)"
+            )
         else:
             baseline_cer = _get_baseline_cer()
             if baseline_cer is None:
