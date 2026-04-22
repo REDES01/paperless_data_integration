@@ -1,0 +1,35 @@
+groups:
+  - name: htr-drift
+    rules:
+      - alert: HtrInputDrift
+        expr: rate(drift_events_total[5m]) > 0.2
+        for: 2m
+        labels:
+          severity: critical
+          action: rollback
+        annotations:
+          summary: "HTR input distribution has drifted"
+          description: >-
+            Sustained MMD drift events > 0.2/s over last 5m.
+            rollback-ctrl webhook will roll the HTR model to the previous
+            registered version.
+
+  - name: ml-gateway-health
+    rules:
+      - alert: MlGatewayHighErrorRate
+        expr: |
+          (sum(rate(htr_requests_total{status!="ok"}[5m]))
+           / clamp_min(sum(rate(htr_requests_total[5m])), 0.001)) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ml-gateway HTR error rate > 10%"
+
+      - alert: MlGatewayDown
+        expr: up{job="ml-gateway"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ml-gateway is not responding to Prometheus scrapes"

@@ -1,0 +1,39 @@
+# Qdrant indexer — chunks merged_text + embeds + upserts to Qdrant.
+#
+# Built from paperless_data_integration/:
+#   docker compose -f qdrant_indexer/compose.yml up -d --build
+
+services:
+  qdrant_indexer:
+    build:
+      context: ..
+      dockerfile: qdrant_indexer/Dockerfile
+    container_name: qdrant_indexer
+    environment:
+      KAFKA_BOOTSTRAP: redpanda:9092
+      KAFKA_TOPIC: paperless.uploads
+      KAFKA_GROUP_ID: qdrant-indexer
+
+      # Data-role postgres (dual-network attachment to reach it).
+      DB_DSN: "host=postgres dbname=paperless user=user password=paperless_postgres"
+
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      QDRANT_COLLECTION: document_chunks
+
+      RETR_MODEL_NAME: sentence-transformers/all-mpnet-base-v2
+      CHUNK_SIZE: "500"
+      CHUNK_OVERLAP: "100"
+
+      LOG_LEVEL: INFO
+    networks:
+      - paperless_ml_net          # reach qdrant, redpanda
+      - paperless_data_default    # reach postgres
+    restart: unless-stopped
+
+networks:
+  paperless_ml_net:
+    external: true
+  paperless_data_default:
+    external: true
+    name: paperless_data_default

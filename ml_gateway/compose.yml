@@ -1,0 +1,66 @@
+# ML Gateway — serving for HTR + semantic search.
+#
+# Built from paperless_data_integration/:
+#   docker compose -f ml_gateway/compose.yml up -d --build
+#
+# First build takes 10-15 min on a m1.xlarge (TrOCR ~650MB + mpnet ~450MB
+# downloaded at image build time so startup is fast at runtime).
+#
+# Attaches to the shared paperless_ml_net. Postgres reachable via that
+# network; so is Qdrant, MinIO, and (optionally) MLflow for model registry.
+
+services:
+  ml_gateway:
+    build:
+      context: ..
+      dockerfile: ml_gateway/Dockerfile
+    container_name: ml_gateway
+    environment:
+      # MinIO (shared with htr_consumer + drift_monitor)
+      MINIO_ENDPOINT:   minio:9000
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: paperless_minio
+
+      # Qdrant
+      QDRANT_HOST:      qdrant
+      QDRANT_PORT:      "6333"
+      QDRANT_COLLECTION: document_chunks
+
+      # Models (overridable for experimentation)
+      HTR_MODEL_NAME:   microsoft/trocr-base-handwritten
+      RETR_MODEL_NAME:  sentence-transformers/all-mpnet-base-v2
+
+      # MLflow-registered HTR model override. File content takes precedence.
+      # scripts/deploy_model.sh writes this at promotion time; rollback writes
+      # the previous version. Empty file = pretrained.
+      MODEL_REGISTRY_FILE: /models/current_htr.txt
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+
+      LOG_LEVEL: INFO
+    volumes:
+      # Shared volume with deploy_model.sh + rollback_controller. Writes
+      # here are picked up via SIGHUP.
+      - model_registry:/models
+    ports:
+      # Exposed on the VM's localhost for Paperless's /ml-api proxy and
+      # direct curl tests. The shared-network alias ml_gateway:8000 is
+      # what other compose services use.
+      - "127.0.0.1:8100:8000"
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health',timeout=2)"]
+      interval: 20s
+      timeout: 5s
+      retries: 30
+      start_period: 120s    # first boot loads both models into memory
+
+networks:
+  paperless_ml_net:
+    external: true
+
+volumes:
+  model_registry:
+    external: true
+    name: ml_gateway_model_registry

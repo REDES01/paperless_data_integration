@@ -1,0 +1,122 @@
+# Observability stack — Prometheus + Grafana + Alertmanager + MLflow +
+# rollback controller. Runs on the shared paperless_ml_net network.
+#
+# Built from paperless_data_integration/:
+#   docker compose -f observability/compose.yml up -d --build
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER:     admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.17.2
+    container_name: mlflow
+    command: >-
+      mlflow server
+      --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --serve-artifacts
+    volumes:
+      - mlflow_data:/mlflow
+    ports:
+      - "5000:5000"
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+
+  rollback_ctrl:
+    build:
+      context: ..
+      dockerfile: observability/rollback_ctrl/Dockerfile
+    container_name: rollback_ctrl
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: htr
+      MODEL_REGISTRY_FILE: /models/current_htr.txt
+      ML_GATEWAY_CONTAINER: ml_gateway
+      LOG_LEVEL: INFO
+    volumes:
+      - model_registry:/models
+      # Mount docker socket so rollback controller can send SIGHUP to ml_gateway
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - paperless_ml_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health',timeout=2)"]
+      interval: 20s
+      timeout: 3s
+      retries: 20
+
+networks:
+  paperless_ml_net:
+    external: true
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+  mlflow_data:
+  model_registry:
+    external: true
+    name: ml_gateway_model_registry

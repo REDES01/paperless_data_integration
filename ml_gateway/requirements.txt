@@ -1,0 +1,16 @@
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+pydantic==2.9.2
+prometheus-client==0.21.0
+minio==7.2.9
+Pillow==10.4.0
+numpy==1.26.4
+# Transformers stack for TrOCR
+transformers==4.45.2
+torch==2.4.1
+# Sentence transformers for retrieval
+sentence-transformers==3.2.1
+# Qdrant client
+qdrant-client==1.12.1
+# MLflow for loading registered models (optional path)
+mlflow==2.17.2
