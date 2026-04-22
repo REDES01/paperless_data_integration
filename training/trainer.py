@@ -106,7 +106,7 @@ class RunConfig:
 
     # Memory / stability knobs
     freeze_encoder: bool = True           # freeze ViT; only train decoder
-    gradient_checkpointing: bool = True   # trade compute for memory
+    gradient_checkpointing: bool = False  # opt-in; some HF models break with this
 
 
 def load_config(path: str) -> RunConfig:
