@@ -455,6 +455,9 @@ def run(config: RunConfig) -> int:
             log.info("registering model to MLflow registry as '%s'", config.register_name)
             try:
                 # Log the model — uses mlflow.transformers for correct serialization
+                # Explicit pip_requirements bypasses MLflow's auto-introspection,
+                # which tries to import torchvision for image-to-text pipelines
+                # and crashes on ModuleNotFoundError in our CPU-only image.
                 mlflow.transformers.log_model(
                     transformers_model={
                         "model": model,
@@ -464,6 +467,12 @@ def run(config: RunConfig) -> int:
                     artifact_path="model",
                     task="image-to-text",
                     registered_model_name=config.register_name,
+                    pip_requirements=[
+                        "torch==2.4.1",
+                        "transformers==4.45.2",
+                        "sentencepiece==0.2.0",
+                        "Pillow==10.4.0",
+                    ],
                 )
                 log.info("registered model uri: models:/%s/<latest>", config.register_name)
             except Exception as exc:
