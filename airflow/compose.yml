@@ -33,7 +33,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__WEBSERVER__WORKERS: "2"
     # Install the docker provider at container start so DockerOperator works
     # without needing a custom image. Keeps this compose self-contained.
-    _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-docker==3.14.0"
+    _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-docker"
   volumes:
     - ./dags:/opt/airflow/dags
     - airflow_logs:/opt/airflow/logs
