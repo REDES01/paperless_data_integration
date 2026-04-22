@@ -1,0 +1,50 @@
+# Baseline v2: trocr-base-stage1 — the PRE-fine-tuning TrOCR checkpoint.
+#
+# Why stage1 (not printed, not handwritten)?
+# This is the checkpoint the TrOCR authors released for users who want to
+# fine-tune on their own data. The encoder (DeiT-base) and decoder (Roberta-base)
+# have been pretrained SEPARATELY on vision data and text data, but have never
+# been jointly trained on image-to-text. IAM fine-tuning is the canonical
+# next step.
+#
+# Why not handwritten?
+#   trocr-base-handwritten IS trocr-base-stage1 + IAM fine-tuning. So it's
+#   already at ceiling on IAM (~3.4% CER per the TrOCR paper). Fine-tuning
+#   from there on IAM adds noise without new signal.
+#
+# Why not printed?
+#   trocr-base-printed is stage1 + SROIE (receipts) fine-tuning. It saw
+#   typeset text, not handwriting. Gap is too big to close on CPU budget.
+#
+# Stage1 gives us a MEANINGFUL improvement target:
+#   - Expected baseline CER on IAM: 0.30-0.60 (40-70% char accuracy)
+#   - Expected post-fine-tune CER:   0.10-0.25 (75-90% char accuracy)
+#   - Clear, measurable delta to show the quality gate + registry working.
+#
+# Runs in ~3 minutes on CPU (eval only, no training).
+
+run_name: baseline_stage1
+role: baseline
+
+training_sources: []
+max_train_examples: 0
+max_val_examples: 200
+
+base_model: microsoft/trocr-base-stage1
+
+# No training in baseline runs
+epochs: 0
+batch_size: 2
+learning_rate: 0.0
+weight_decay: 0.0
+warmup_steps: 0
+max_new_tokens: 128
+
+device: cpu
+eval_batch_size: 4
+seed: 42
+
+freeze_encoder: true
+gate_tolerance: 1.05
+register_on_pass: false
+register_name: htr

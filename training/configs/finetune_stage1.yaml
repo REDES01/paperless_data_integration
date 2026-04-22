@@ -1,0 +1,56 @@
+# Fine-tune v2: trocr-base-stage1 → IAM with enough data to actually learn.
+#
+# Sized for CPU: 1000 examples × 2 epochs × batch 2 = 1000 gradient steps.
+# Expected wall time: ~2-3 hours on CPU. Run overnight.
+#
+# Frozen encoder is deliberate:
+#   - The ViT encoder in stage1 has strong visual priors from ImageNet
+#     pretraining. Adapting only the decoder is enough to map its features
+#     onto English text.
+#   - Frozen-encoder training is ~2x faster per step (no backprop through
+#     encoder) — the difference between 2hr and 5hr overnight.
+#   - If frozen doesn't converge enough, the v3 config can unfreeze.
+#
+# Hyperparameters follow the TrOCR paper's IAM recipe, scaled down for CPU:
+#   - LR 5e-5 matches their fine-tuning LR (they used 1e-5 with larger batch)
+#   - Warmup 100 steps = 10% of total steps
+#   - Label smoothing is handled by TrOCR's default model config
+#
+# Expected gate outcome: PASS. Val CER should drop from stage1 baseline
+# (~0.30-0.60) into the 0.10-0.25 range. Gate accepts since:
+#   (1) val_cer < 1.0
+#   (2) train_loss_final < train_loss_initial
+# Registers as htr/vN (incrementing from current /v1).
+
+run_name: finetune_stage1
+role: finetune
+
+training_sources: [iam]
+max_train_examples: 1000
+max_val_examples: 200
+iam_split: train
+
+base_model: microsoft/trocr-base-stage1
+
+epochs: 2
+batch_size: 2
+learning_rate: 5.0e-5
+weight_decay: 0.01
+warmup_steps: 100
+max_new_tokens: 128
+
+device: cpu
+eval_batch_size: 4
+seed: 42
+
+# Decoder-only training: CPU-friendly, encoder priors are already strong
+freeze_encoder: true
+
+# Gate is the principled one hard-coded in trainer.py:
+#   val_cer < 1.0 AND train_loss_final < train_loss_initial
+# gate_tolerance only matters for the vs-baseline comparison that's logged
+# for observability; it's not what blocks/passes the run.
+gate_tolerance: 1.05
+
+register_on_pass: true
+register_name: htr
