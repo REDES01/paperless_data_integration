@@ -1,0 +1,48 @@
+# Continuous retraining: TrOCR-base-stage1 fine-tuned on IAM + user corrections.
+#
+# This is the target for training_scheduler — every INTERVAL_MIN minutes the
+# scheduler fires this service. Gate logic (trainer.py) decides whether to
+# register the result as a new htr version.
+#
+# Key differences vs finetune_iam_stage1:
+#   training_sources: [iam, corrections]  — pulls from BOTH IAM (stable
+#     eval basis) and the htr_corrections table (user feedback signal)
+#   snapshot_version: latest  — data.py reads the most recent snapshot
+#     published by the data pipeline
+#
+# If the corrections table is empty (no users have reviewed yet), data.py
+# falls back to IAM-only gracefully — the scheduler still fires, still
+# produces a run, but it's effectively a re-fine-tune on the same data.
+# This is the correct behavior: the scheduler is driven by TIME, not by
+# data availability.
+#
+# Expected runtime ~1.5-2h CPU. The scheduler default INTERVAL_MIN=60 means
+# one run completes inside one interval; back-to-back runs will stack fine.
+
+run_name: finetune_combined_stage1
+role: finetune
+
+training_sources: [iam, corrections]
+snapshot_version: latest
+max_train_examples: 1000
+max_val_examples: 200
+iam_split: train
+
+base_model: microsoft/trocr-base-stage1
+
+epochs: 2
+batch_size: 4
+learning_rate: 3.0e-5
+weight_decay: 0.01
+warmup_steps: 100
+max_new_tokens: 128
+
+freeze_encoder: false
+
+device: cpu
+eval_batch_size: 4
+seed: 42
+
+gate_tolerance: 1.05
+register_on_pass: true
+register_name: htr
