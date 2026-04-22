@@ -1,16 +1,18 @@
 # Fine-tune TrOCR on IAM + user corrections combined.
-# This is the candidate we'd expect to pick in a real production setup —
-# the external dataset gives the model a broad handwriting prior, the user
-# corrections adapt it to domain-specific documents.
+# In a mature production deployment this would be the preferred candidate —
+# external dataset provides the broad handwriting prior, user corrections
+# adapt to domain-specific documents.
 #
-# Expected runtime: ~20-25 min on CPU.
+# On a fresh system (no corrections yet) this degrades to "finetune_iam
+# with extra loader overhead" — IAM loads fine, corrections return [],
+# training sees only IAM examples. Same gentle-LR regime as finetune_iam.
 
 run_name: finetune_combined
 role: finetune
 
 training_sources: [iam, corrections]
 snapshot_version: latest
-max_train_examples: 150       # 150 per source → 300 total
+max_train_examples: 150          # 150 per source; 300 total when both present
 max_val_examples: 100
 iam_split: train
 
@@ -18,9 +20,9 @@ base_model: microsoft/trocr-base-handwritten
 
 epochs: 1
 batch_size: 2
-learning_rate: 5.0e-5
+learning_rate: 1.0e-6
 weight_decay: 0.01
-warmup_steps: 0
+warmup_steps: 20
 max_new_tokens: 128
 
 device: cpu

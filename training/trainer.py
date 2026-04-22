@@ -261,6 +261,20 @@ def finetune(
         weight_decay=config.weight_decay,
     )
 
+    # Linear warmup: LR ramps from 0 to target over warmup_steps. Important
+    # for TrOCR fine-tuning because the first few gradient steps on a
+    # near-optimal pretrained model can otherwise kick it off-manifold.
+    total_steps = max(1, config.epochs * len(loader))
+    warmup = max(0, min(config.warmup_steps, total_steps))
+
+    def lr_lambda(step: int) -> float:
+        if warmup > 0 and step < warmup:
+            return float(step) / float(warmup)
+        return 1.0
+
+    from torch.optim.lr_scheduler import LambdaLR
+    scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
+
     initial_loss = None
     final_loss = None
     steps = 0
@@ -277,6 +291,7 @@ def finetune(
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            scheduler.step()
 
             loss_val = float(loss.detach().cpu().item())
             epoch_losses.append(loss_val)

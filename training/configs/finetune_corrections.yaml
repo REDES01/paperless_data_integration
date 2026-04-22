@@ -1,13 +1,11 @@
 # Fine-tune TrOCR on user corrections only.
-# This demonstrates the CORE RETRAINING LOOP the rubric wants to see:
-# user correction → versioned snapshot → training → quality gate → registry.
+# Demonstrates the CORE RETRAINING LOOP: user correction → versioned
+# snapshot → training → quality gate → registry.
 #
-# For the demo, we point at the latest snapshot produced by batch_htr.py.
-# If no corrections exist yet (fresh system), this candidate loads 0 training
-# examples and will NOT pass the quality gate — which is the correct behavior
-# (we shouldn't register a model that saw no data).
-#
-# Expected runtime: ~5-10 min depending on snapshot size.
+# On a fresh system with no corrections yet, the snapshot loader returns
+# an empty list. The trainer's role=finetune check then fails the gate
+# with reason "no training data loaded" — which is the CORRECT behavior.
+# (We should not register a model that saw zero training examples.)
 
 run_name: finetune_corrections
 role: finetune
@@ -21,9 +19,9 @@ base_model: microsoft/trocr-base-handwritten
 
 epochs: 1
 batch_size: 2
-learning_rate: 5.0e-5
+learning_rate: 1.0e-6        # gentle LR matching finetune_iam
 weight_decay: 0.01
-warmup_steps: 0
+warmup_steps: 20
 max_new_tokens: 128
 
 device: cpu

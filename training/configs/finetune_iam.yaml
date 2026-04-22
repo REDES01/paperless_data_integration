@@ -2,7 +2,14 @@
 # Closest analog of "train from scratch on the external non-synthetic dataset"
 # that the rubric requires.
 #
-# With 200 train examples, batch 2, 1 epoch, CPU: ~15 minutes total.
+# LR NOTES:
+#   Our baseline (pretrained TrOCR) is already at CER 0.37% on IAM val —
+#   essentially memorized the distribution. LR=5e-5 (HF default for general
+#   fine-tuning) is too aggressive here; it produces catastrophic forgetting
+#   on small batch CPU training. We use 1e-6 with 20 warmup steps — standard
+#   practice for fine-tuning a near-optimal model on a limited sample.
+#
+# Runtime: ~15 min on CPU.
 
 run_name: finetune_iam
 role: finetune
@@ -16,9 +23,9 @@ base_model: microsoft/trocr-base-handwritten
 
 epochs: 1
 batch_size: 2
-learning_rate: 5.0e-5
+learning_rate: 1.0e-6        # 50x smaller than v1 (5e-5) — preserves pretrained quality
 weight_decay: 0.01
-warmup_steps: 0
+warmup_steps: 20             # prevent sudden gradient spikes at start
 max_new_tokens: 128
 
 device: cpu
