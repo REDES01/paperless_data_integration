@@ -1,23 +1,13 @@
 # Drift monitor service.
 #
-# Topology (attaches to the paperless-ml shared network so it can reach
-# MinIO + Prometheus scrapes it):
-#   - paperless_ml_net   external     (where minio, redpanda, ml-gateway live)
+# Topology: attaches to the paperless-ml shared network so it can reach
+# MinIO + Prometheus scrapes it.
 #
 # Usage (from paperless_data_integration/):
 #
 #   docker compose -f drift_monitor/compose.yml up -d --build
 #   docker compose -f drift_monitor/compose.yml logs -f
 #   docker compose -f drift_monitor/compose.yml down
-#
-# Prometheus scrape config needs a new job (ops/prometheus/prometheus.yml):
-#
-#   - job_name: drift-monitor
-#     metrics_path: /metrics
-#     static_configs:
-#       - targets: ["drift_monitor:8000"]
-#         labels:
-#           service: drift-monitor
 
 services:
   drift_monitor:
@@ -26,27 +16,31 @@ services:
       dockerfile: drift_monitor/Dockerfile
     container_name: drift_monitor
     environment:
+      # Data-stack MinIO credentials (same as htr_consumer + ml_gateway).
       MINIO_ENDPOINT:   minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: paperless_minio
       DRIFT_REF_BUCKET: paperless-datalake
       DRIFT_REF_PREFIX: warehouse/drift_reference/htr_v1/cd
       DRIFT_CROP_HEIGHT: "64"
       DRIFT_CROP_WIDTH:  "512"
+      DRIFT_RETRY_SECONDS: "60"
       LOG_LEVEL: INFO
     ports:
-      # Bound to localhost for debugging / curl tests. Internal scraping
-      # uses the compose network name instead.
-      - "127.0.0.1:8100:8000"
+      # Bound to localhost:8200 (ml_gateway owns :8100) for curl debugging.
+      # Internal scraping uses the compose network name drift_monitor:8000.
+      - "127.0.0.1:8200:8000"
     networks:
       - paperless_ml_net
     restart: unless-stopped
     healthcheck:
+      # Start period is long enough that "detector not yet loaded" doesn't
+      # cause a false-negative restart loop.
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health',timeout=2)"]
       interval: 15s
       timeout: 3s
       retries: 20
-      start_period: 60s
+      start_period: 180s
 
 networks:
   paperless_ml_net:
