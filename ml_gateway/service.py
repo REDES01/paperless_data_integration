@@ -119,8 +119,21 @@ def _load_htr():
                 # MLflow model URIs look like "models:/htr/1" or "runs:/<id>/model"
                 import mlflow.transformers
                 model_dict = mlflow.transformers.load_model(uri, return_type="components")
-                state.htr_processor = model_dict["image_processor"] if "image_processor" in model_dict \
-                    else TrOCRProcessor.from_pretrained(HTR_MODEL_NAME)
+                # MLflow's components dict exposes image_processor and
+                # tokenizer separately. TrOCR's decoding calls batch_decode,
+                # which is a TOKENIZER method — a ViTImageProcessor alone
+                # does not have it. Reconstruct a TrOCRProcessor that
+                # bundles both so predict_htr can call batch_decode on it.
+                image_proc = model_dict.get("image_processor")
+                tokenizer  = model_dict.get("tokenizer")
+                if image_proc is not None and tokenizer is not None:
+                    state.htr_processor = TrOCRProcessor(
+                        image_processor=image_proc, tokenizer=tokenizer,
+                    )
+                else:
+                    # Fall back: fine-tuning only changes model weights,
+                    # so the base-checkpoint processor is still valid.
+                    state.htr_processor = TrOCRProcessor.from_pretrained(HTR_MODEL_NAME)
                 state.htr_model = model_dict["model"]
                 version = uri
                 log.info("HTR loaded from MLflow: %s", uri)
