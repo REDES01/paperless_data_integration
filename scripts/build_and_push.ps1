@@ -42,18 +42,23 @@ if ($SkipPush) {
     exit 0
 }
 
-# ── Build and push in one step ──
+# ── Build and push ──
 # --provenance=false prevents Docker Desktop from adding attestation manifests
 # that older Docker versions on the VM can't unpack (the "mismatched image
 # rootfs and manifest layers" error).
+#
+# Tag ONLY with the GHCR name during --push. Giving buildx two tags (one
+# with registry, one without) makes it try to push to BOTH registries — and
+# the untagged local name resolves to docker.io/library/<name>:latest, where
+# we have no push access. After the GHCR push, we re-tag locally with a
+# separate `docker tag` so developers still have a short local name.
 Write-Host "Building and pushing $IMAGE_GHCR from $FORK_DIR ..." -ForegroundColor Cyan
 Write-Host "(This takes 5-15 minutes on first build, <2 min on cached rebuilds)" -ForegroundColor DarkGray
-Write-Host "If this fails with 'denied', run: docker login ghcr.io -u REDES01" -ForegroundColor DarkGray
+Write-Host "If this fails with 'denied' or 'unauthorized', run: docker login ghcr.io -u REDES01" -ForegroundColor DarkGray
 
 docker buildx build `
     --provenance=false `
     --tag $IMAGE_GHCR `
-    --tag $IMAGE_LOCAL `
     --push `
     $FORK_DIR
 
@@ -63,8 +68,19 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# ── Pull back into local daemon + re-tag with a short name for convenience ──
+# buildx with the containerd image store may not leave the built image in
+# the local `docker images` list. Pull from GHCR to make it locally
+# available, then tag with the short name.
+Write-Host "Pulling $IMAGE_GHCR back into local image store..." -ForegroundColor Cyan
+docker pull $IMAGE_GHCR
+if ($LASTEXITCODE -eq 0) {
+    docker tag $IMAGE_GHCR $IMAGE_LOCAL
+    Write-Host "Local tag: $IMAGE_LOCAL" -ForegroundColor DarkGray
+}
+
 Write-Host ""
 Write-Host "Done. Image available at $IMAGE_GHCR" -ForegroundColor Green
 Write-Host ""
 Write-Host "On the Chameleon VM, pull with:" -ForegroundColor Cyan
-Write-Host "  docker pull $IMAGE_GHCR"
+Write-Host "  sg docker -c 'docker pull $IMAGE_GHCR'"
