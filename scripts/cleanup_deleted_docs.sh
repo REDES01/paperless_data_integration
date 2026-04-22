@@ -1,25 +1,27 @@
 #!/usr/bin/env bash
 # Cleanup orphaned ML-side data for Paperless documents that are no longer
-# active in Paperless. "Orphaned" means:
+# active in Paperless. "Active" here means Paperless has a row with that id
+# AND deleted_at IS NULL (django-soft-delete convention — soft-deleted rows
+# stay in documents_document but with deleted_at populated).
 #
+# "Orphaned" means:
 #     ML Postgres has a `documents` row with paperless_doc_id=N and
-#     deleted_at IS NULL, but Paperless's own DB has no active document
-#     with id=N (either hard-deleted or soft-deleted in Paperless).
+#     deleted_at IS NULL, but Paperless's own DB has either:
+#       - no row with id=N (hard-deleted), OR
+#       - a row with id=N but deleted_at IS NOT NULL (soft-deleted)
 #
 # Needed because the paperless_ml delete-signal handlers only fire going
-# forward; docs deleted BEFORE that code shipped have live ML-side rows
-# and live Qdrant vectors.
+# forward (and only in images rebuilt AFTER commit e2989d05b). Docs deleted
+# BEFORE that code rolled out have live ML-side rows and Qdrant vectors.
 #
 # What this script does:
-#   1. List active paperless doc ids from Paperless's db
+#   1. List *active* paperless doc ids (deleted_at IS NULL) from Paperless DB
 #   2. Find ML documents rows whose paperless_doc_id is NOT in that set
 #      AND whose deleted_at is still NULL
 #   3. UPDATE documents SET deleted_at = NOW() for those
 #   4. DELETE matching Qdrant points via the collection's REST API
-#      (called from inside paperless-webserver-1, which has `curl` and
-#      is on paperless_ml_net so it can reach qdrant:6333)
 #
-# Idempotent: safe to run again. Already-cleaned rows are filtered out.
+# Idempotent: safe to re-run. Already-cleaned rows are filtered out.
 #
 # Run on the VM:
 #   cd ~/paperless_data_integration
@@ -32,10 +34,10 @@ ML_DB_CONTAINER="${ML_DB_CONTAINER:-postgres}"
 WEBSERVER_CONTAINER="${WEBSERVER_CONTAINER:-paperless-webserver-1}"
 QDRANT_COLLECTION="${QDRANT_COLLECTION:-document_chunks}"
 
-# ─── 1. Active paperless doc ids ───────────────────────────────────────
-echo "━━━ 1. Active paperless doc ids (from Paperless DB) ━━━"
+# ─── 1. Active paperless doc ids (deleted_at IS NULL) ──────────────────
+echo "━━━ 1. Active paperless doc ids (from Paperless DB, deleted_at IS NULL) ━━━"
 active_ids=$(sg docker -c "docker exec ${PAPERLESS_DB_CONTAINER} psql -U paperless -d paperless -t -A -c \
-    \"SELECT id FROM documents_document;\"" | tr '\n' ',' | sed 's/,$//')
+    \"SELECT id FROM documents_document WHERE deleted_at IS NULL;\"" | tr '\n' ',' | sed 's/,$//')
 active_count=$(echo "$active_ids" | tr ',' '\n' | grep -c . || true)
 echo "count: $active_count"
 echo "ids:   ${active_ids:-<none>}"
@@ -50,7 +52,6 @@ else
 fi
 orphan_ids=$(sg docker -c "docker exec ${ML_DB_CONTAINER} psql -U user -d paperless -t -A -c \"$orphan_sql\"" | tr '\n' ' ')
 
-# Trim whitespace
 orphan_ids=$(echo "$orphan_ids" | xargs)
 if [ -z "$orphan_ids" ]; then
     echo "orphan paperless_doc_ids: <none>"
