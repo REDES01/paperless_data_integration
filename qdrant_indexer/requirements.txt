@@ -1,4 +1,4 @@
-kafka-python==2.0.2
+kafka-python-ng==2.2.3
 psycopg2-binary==2.9.10
 qdrant-client==1.12.1
 sentence-transformers==3.2.1
