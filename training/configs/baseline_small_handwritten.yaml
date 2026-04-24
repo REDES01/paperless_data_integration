@@ -1,0 +1,29 @@
+# Baseline: TrOCR-small-handwritten, no fine-tuning.
+# Smaller (62M params vs 334M) handwritten-pretrained checkpoint.
+# Expected CER on IAM: ~0.08-0.15 (near ceiling but lighter).
+# Evaluation only — no training.
+# Runtime: ~1-2 min on CPU.
+
+run_name: baseline_small_handwritten
+role: baseline
+
+training_sources: []
+max_train_examples: 0
+max_val_examples: 100
+
+base_model: microsoft/trocr-small-handwritten
+
+epochs: 0
+batch_size: 2
+learning_rate: 0.0
+weight_decay: 0.0
+warmup_steps: 0
+max_new_tokens: 128
+
+device: cpu
+eval_batch_size: 4
+seed: 42
+
+gate_tolerance: 1.05
+register_on_pass: false
+register_name: htr

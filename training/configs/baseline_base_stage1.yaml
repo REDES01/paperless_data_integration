@@ -1,0 +1,29 @@
+# Baseline: TrOCR-base-stage1, no fine-tuning.
+# Stage-1 pre-trained (encoder+decoder), NOT OCR-fine-tuned yet.
+# Expected CER on IAM: ~0.2-0.4 (the textbook "fine-tune from here" starting point).
+# Evaluation only — no training.
+# Runtime: ~3-5 min on CPU (base = 334M params).
+
+run_name: baseline_base_stage1
+role: baseline
+
+training_sources: []
+max_train_examples: 0
+max_val_examples: 100
+
+base_model: microsoft/trocr-base-stage1
+
+epochs: 0
+batch_size: 2
+learning_rate: 0.0
+weight_decay: 0.0
+warmup_steps: 0
+max_new_tokens: 128
+
+device: cpu
+eval_batch_size: 4
+seed: 42
+
+gate_tolerance: 1.05
+register_on_pass: false
+register_name: htr

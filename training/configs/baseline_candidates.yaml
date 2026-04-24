@@ -1,0 +1,10 @@
+# Multiple baseline configs to evaluate CER of candidate TrOCR checkpoints.
+# Used with scripts/eval_all_baselines.sh to pick the best starting point
+# for fine-tuning — we want a checkpoint that's "okay but not ceiling",
+# i.e., CER roughly in 0.15-0.30 range, so fine-tuning shows real signal.
+
+# Each candidate gets its own config file for clarity:
+#   baseline_small_handwritten.yaml
+#   baseline_small_stage1.yaml
+#   baseline_base_stage1.yaml
+# This file is documentation; the trainer reads one config at a time.
