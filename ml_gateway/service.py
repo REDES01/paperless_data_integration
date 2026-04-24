@@ -63,6 +63,27 @@ RETR_MODEL_NAME   = os.environ.get("RETR_MODEL_NAME",   "sentence-transformers/a
 # controller rewrites it; SIGHUP triggers a reload.
 MODEL_REGISTRY_FILE = os.environ.get("MODEL_REGISTRY_FILE", "/models/current_htr.txt")
 
+# ── Feedback-aware reranker ───────────────────────────────────────
+# ml_gateway over-fetches 2x from Qdrant and reranks results using
+# per-document thumbs-up/down feedback aggregated by the airflow
+# search_feedback_rerank DAG. Formula:
+#     final = cosine_similarity * (1 + alpha_up*up_rate - alpha_down*down_rate)
+# Docs with no feedback fall back to pure cosine (boost factor 1.0).
+#
+# Stats table (document_feedback_stats) is read on demand with an in-memory
+# TTL cache to avoid hitting Postgres on every request.
+PAPERLESS_ML_DB_HOST = os.environ.get("PAPERLESS_ML_DB_HOST", "postgres")
+PAPERLESS_ML_DB_PORT = int(os.environ.get("PAPERLESS_ML_DB_PORT", "5432"))
+PAPERLESS_ML_DB_NAME = os.environ.get("PAPERLESS_ML_DB_NAME", "paperless")
+PAPERLESS_ML_DB_USER = os.environ.get("PAPERLESS_ML_DB_USER", "user")
+PAPERLESS_ML_DB_PASSWORD = os.environ.get("PAPERLESS_ML_DB_PASSWORD", "paperless_postgres")
+
+RERANKER_ENABLED    = os.environ.get("RERANKER_ENABLED", "true").lower() == "true"
+RERANKER_ALPHA_UP   = float(os.environ.get("RERANKER_ALPHA_UP",   "0.3"))
+RERANKER_ALPHA_DOWN = float(os.environ.get("RERANKER_ALPHA_DOWN", "0.5"))
+RERANKER_OVERFETCH  = int(os.environ.get("RERANKER_OVERFETCH", "2"))
+RERANKER_STATS_TTL  = int(os.environ.get("RERANKER_STATS_TTL_SECONDS", "60"))
+
 
 # ── Prometheus metrics ─────────────────────────────────────────────
 
@@ -84,6 +105,77 @@ htr_confidence = Histogram(
     "htr_confidence", "Per-region HTR confidence",
     buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
 )
+# Reranker telemetry — every /predict/search hit is either reranked or not.
+rerank_events = Counter(
+    "rerank_events_total", "Search results reranked by feedback stats",
+    ["outcome"],  # boosted, demoted, neutral, disabled
+)
+
+
+class FeedbackStatsCache:
+    """Thread-safe TTL cache for per-document feedback stats.
+
+    Reads from document_feedback_stats (populated by the airflow
+    search_feedback_rerank DAG). Refreshes lazily on first access after
+    TTL expiry. A single refresh holds a lock so concurrent requests
+    don't all hammer Postgres during cache expiry.
+    """
+
+    def __init__(self, ttl_seconds: int = 60):
+        self.ttl_seconds = ttl_seconds
+        self._stats: dict[str, dict] = {}
+        self._expires_at = 0.0
+        self._lock = Lock()
+
+    def get(self) -> dict[str, dict]:
+        now = time.time()
+        if now < self._expires_at:
+            return self._stats
+        with self._lock:
+            # Double-check under lock: another thread may have refreshed
+            if now < self._expires_at:
+                return self._stats
+            try:
+                self._stats = self._fetch()
+                self._expires_at = now + self.ttl_seconds
+            except Exception as exc:
+                # On DB error, keep stale cache + extend TTL a bit so we
+                # don't hammer Postgres. Reranker degrades to neutral for
+                # any missing-from-cache docs, which is safe.
+                log.warning("feedback stats refresh failed: %s — keeping stale cache", exc)
+                self._expires_at = now + 5
+        return self._stats
+
+    def _fetch(self) -> dict[str, dict]:
+        import psycopg2
+        dsn = (
+            f"host={PAPERLESS_ML_DB_HOST} port={PAPERLESS_ML_DB_PORT} "
+            f"dbname={PAPERLESS_ML_DB_NAME} user={PAPERLESS_ML_DB_USER} "
+            f"password={PAPERLESS_ML_DB_PASSWORD}"
+        )
+        with psycopg2.connect(dsn, connect_timeout=3) as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT document_id::text, thumbs_up, thumbs_down, total_impressions,
+                       up_rate, down_rate
+                FROM document_feedback_stats
+            """)
+            rows = cur.fetchall()
+        out: dict[str, dict] = {}
+        for doc_id, up, down, imp, up_rate, down_rate in rows:
+            out[doc_id] = {
+                "thumbs_up":         up,
+                "thumbs_down":       down,
+                "total_impressions": imp,
+                "up_rate":           float(up_rate or 0.0),
+                "down_rate":         float(down_rate or 0.0),
+            }
+        log.info("reranker cache refreshed: %d doc stats loaded", len(out))
+        return out
+
+
+feedback_cache = FeedbackStatsCache(ttl_seconds=RERANKER_STATS_TTL)
+
+
 model_version_gauge = Counter(
     "model_reloads_total", "HTR model reload events", ["source"]
 )
@@ -354,32 +446,71 @@ def predict_search(req: SearchRequest):
         search_requests_total.labels(status="embed_error").inc()
         raise HTTPException(status_code=500, detail="embed error") from exc
 
+    # Over-fetch so reranking can move things in from below the cutoff.
+    fetch_limit = k * RERANKER_OVERFETCH if RERANKER_ENABLED else k
     try:
         hits = state.qdrant.search(
             collection_name=QDRANT_COLLECTION,
             query_vector=vec,
-            limit=k,
+            limit=fetch_limit,
         )
     except Exception as exc:
         log.warning("qdrant search error: %s", exc)
         search_requests_total.labels(status="qdrant_error").inc()
         raise HTTPException(status_code=502, detail="qdrant error") from exc
 
+    # Apply feedback-aware reranking if enabled. Each hit gets a boost
+    # factor based on accumulated user feedback on that document; final
+    # ranking is by boosted score, then we slice to top-k.
+    stats_map = feedback_cache.get() if RERANKER_ENABLED else {}
+
     results = []
     for i, h in enumerate(hits):
         payload = h.payload or {}
         snippet = payload.get("snippet", "")
-        score = float(h.score)
-        # Each result carries both field-name variants so either contract works.
+        original_score = float(h.score)
+
+        doc_id = payload.get("document_id", "")
+        stats = stats_map.get(str(doc_id)) if doc_id else None
+
+        if stats and stats["total_impressions"] > 0:
+            up_rate   = stats["up_rate"]
+            down_rate = stats["down_rate"]
+            boost = 1.0 + RERANKER_ALPHA_UP * up_rate - RERANKER_ALPHA_DOWN * down_rate
+            final_score = original_score * boost
+            if boost > 1.01:
+                rerank_outcome = "boosted"
+            elif boost < 0.99:
+                rerank_outcome = "demoted"
+            else:
+                rerank_outcome = "neutral"
+        else:
+            boost = 1.0
+            final_score = original_score
+            rerank_outcome = "disabled" if not RERANKER_ENABLED else "neutral"
+
+        rerank_events.labels(outcome=rerank_outcome).inc()
+
+        # Each result carries both field-name variants so either client contract works.
         results.append({
-            "document_id":       payload.get("document_id", ""),
+            "document_id":       doc_id,
             "paperless_doc_id":  payload.get("paperless_doc_id"),
             "chunk_index":       payload.get("chunk_index", i),
             "chunk_text":        snippet,
             "snippet":           snippet,           # legacy alias
-            "similarity_score":  score,
-            "score":             score,             # legacy alias
+            "similarity_score":  final_score,
+            "score":             final_score,       # legacy alias
+            # Telemetry for the frontend: show users when feedback affected ranking
+            "original_score":    original_score,
+            "feedback_boost":    boost,
+            "rerank_outcome":    rerank_outcome,
+            "feedback_up":       (stats or {}).get("thumbs_up", 0),
+            "feedback_down":     (stats or {}).get("thumbs_down", 0),
         })
+
+    # Re-sort by boosted score (descending) and slice to requested k
+    results.sort(key=lambda r: r["similarity_score"], reverse=True)
+    results = results[:k]
 
     elapsed_ms = int((time.time() - t0) * 1000)
     search_requests_total.labels(status="ok").inc()

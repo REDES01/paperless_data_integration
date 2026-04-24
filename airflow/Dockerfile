@@ -1,10 +1,11 @@
 FROM apache/airflow:2.10.4
 
-# Pre-install DockerOperator provider at build time instead of at every
-# container start via _PIP_ADDITIONAL_REQUIREMENTS. That env var approach
-# is officially dev-only — the startup install was crash-looping the
-# webserver + scheduler, probably from transient pypi issues or the
-# container exiting before pip completed.
+# Pre-install providers + libraries the DAGs need:
+#   - DockerOperator: apache-airflow-providers-docker
+#   - search_feedback_rerank aggregate task: psycopg2-binary
+# Pinning lets Docker's layer cache skip this step on subsequent builds.
 
 USER airflow
-RUN pip install --no-cache-dir 'apache-airflow-providers-docker'
+RUN pip install --no-cache-dir \
+    'apache-airflow-providers-docker' \
+    'psycopg2-binary>=2.9,<3'

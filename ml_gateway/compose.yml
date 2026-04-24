@@ -36,6 +36,21 @@ services:
       MODEL_REGISTRY_FILE: /models/current_htr.txt
       MLFLOW_TRACKING_URI: http://mlflow:5000
 
+      # Feedback-aware reranker — reads document_feedback_stats from ML Postgres,
+      # applies per-doc boost/demote at /predict/search time. Populated by
+      # airflow DAG search_feedback_rerank (hourly).
+      PAPERLESS_ML_DB_HOST:     postgres
+      PAPERLESS_ML_DB_PORT:     "5432"
+      PAPERLESS_ML_DB_NAME:     paperless
+      PAPERLESS_ML_DB_USER:     user
+      PAPERLESS_ML_DB_PASSWORD: paperless_postgres
+
+      RERANKER_ENABLED:           "true"
+      RERANKER_ALPHA_UP:          "0.3"
+      RERANKER_ALPHA_DOWN:        "0.5"
+      RERANKER_OVERFETCH:         "2"
+      RERANKER_STATS_TTL_SECONDS: "60"
+
       LOG_LEVEL: INFO
     volumes:
       # Shared volume with deploy_model.sh + rollback_controller. Writes

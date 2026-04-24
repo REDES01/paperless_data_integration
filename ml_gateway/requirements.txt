@@ -14,3 +14,5 @@ sentence-transformers==3.2.1
 qdrant-client==1.12.1
 # MLflow for loading registered models (optional path)
 mlflow==2.17.2
+# Feedback-aware reranker reads document_feedback_stats from ML Postgres
+psycopg2-binary>=2.9,<3
