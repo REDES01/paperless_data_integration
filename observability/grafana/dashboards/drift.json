@@ -11,7 +11,7 @@
       "id": 1,
       "type": "stat",
       "title": "Drift Events (per second)",
-      "datasource": "prometheus",
+      "datasource": "Prometheus",
       "gridPos": { "x": 0, "y": 0, "w": 8, "h": 6 },
       "targets": [
         { "expr": "rate(drift_events_total[1m])", "refId": "A" }
@@ -43,7 +43,7 @@
       "id": 2,
       "type": "stat",
       "title": "Checks / sec",
-      "datasource": "prometheus",
+      "datasource": "Prometheus",
       "gridPos": { "x": 8, "y": 0, "w": 8, "h": 6 },
       "targets": [
         { "expr": "rate(drift_checks_total[1m])", "refId": "A" }
@@ -64,7 +64,7 @@
       "id": 3,
       "type": "stat",
       "title": "Errors / sec",
-      "datasource": "prometheus",
+      "datasource": "Prometheus",
       "gridPos": { "x": 16, "y": 0, "w": 8, "h": 6 },
       "targets": [
         {
@@ -98,7 +98,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "MMD Test Statistic Percentiles",
-      "datasource": "prometheus",
+      "datasource": "Prometheus",
       "gridPos": { "x": 0, "y": 6, "w": 12, "h": 10 },
       "targets": [
         {
@@ -130,7 +130,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Drift Event Rate (1m window)",
-      "datasource": "prometheus",
+      "datasource": "Prometheus",
       "gridPos": { "x": 12, "y": 6, "w": 12, "h": 10 },
       "targets": [
         {
