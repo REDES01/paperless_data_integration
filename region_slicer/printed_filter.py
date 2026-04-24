@@ -37,7 +37,14 @@ log = logging.getLogger(__name__)
 # 0.25 is a safe default: misses some poor-scan printed text (keeps them
 # as HTR candidates, mildly wasteful) but catches the main failure mode
 # (printed regions being transcribed by TrOCR and looking like garbage).
-PRINTED_COVERAGE_THRESHOLD = 0.50
+import os
+
+# Threshold tunable via env var so it's easy to disable the filter
+# for testing (set to 1.01 to keep everything) without rebuilding the
+# container.
+PRINTED_COVERAGE_THRESHOLD = float(os.environ.get(
+    "PRINTED_COVERAGE_THRESHOLD", "0.50"
+))
 
 
 def _bbox_area(bbox) -> float:
