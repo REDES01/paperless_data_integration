@@ -7,15 +7,17 @@ Detects and crops handwritten regions from Paperless-ngx documents. This is the 
 1. **Fetches a PDF** from Paperless via its REST API (`GET /api/documents/{id}/download/`)
 2. **Converts each page** to a PIL image at 200 DPI using `pdf2image` (poppler)
 3. **Detects handwritten regions** using horizontal ink-density projection (vendored from the data team's `htr_features.py`)
-4. **Crops each region** and uploads the crop PNG to MinIO at `s3://paperless-images/documents/{doc_id}/regions/p{page}_r{idx}.png`
-5. **Returns structured metadata** — region IDs, bounding boxes, sizes, and MinIO URLs
+4. **Filters out printed text** using Tesseract's archive-PDF word boxes — regions with >25% Tesseract word coverage are dropped before cropping (see `printed_filter.py`)
+5. **Crops each surviving region** and uploads the crop PNG to MinIO at `s3://paperless-images/documents/{doc_id}/regions/p{page}_r{idx}.png`
+6. **Returns structured metadata** — region IDs, bounding boxes, sizes, and MinIO URLs
 
 ## Files
 
 | File | Purpose |
 |---|---|
 | `detector.py` | Region detection algorithm (binarize → horizontal projection → vertical trim → filter by size) |
-| `slicer.py` | Orchestrator: fetch PDF → pages → detect → crop → upload to MinIO |
+| `printed_filter.py` | Tesseract-guided filter: reads word boxes from Paperless's archive PDF, drops regions that are already well-covered by Tesseract-recognized printed text |
+| `slicer.py` | Orchestrator: fetch PDF → pages → detect → filter → crop → upload to MinIO |
 | `demo.py` | CLI for testing against real Paperless documents |
 | `compose.yml` | Run as a one-shot container on `paperless_ml_net` |
 | `Dockerfile` | Python 3.12 + poppler-utils + deps |
@@ -56,7 +58,33 @@ The detector uses horizontal projection on a binarized grayscale image:
 6. Filter out regions smaller than 50×15 pixels
 7. Add 5px padding around each crop
 
-This catches handwritten annotations (dark ink strokes) while ignoring printed text (which is typically lighter on scanned documents). It's a heuristic, not a learned model — the data design doc notes it would be replaced by a detection model in production.
+This catches every ink-dense band — handwritten OR printed. The printed-filter step below is what keeps only the handwritten ones.
+
+## Printed-text filter (B1)
+
+The ink-density detector flags any dense text band. Without the filter, printed text regions would be sent to TrOCR — which is trained on handwriting — producing garbage in the review UI. Tesseract has already read the printed text (Paperless runs it on every upload), so we reuse Tesseract's work to decide which regions to SKIP.
+
+### How it works
+
+1. Fetch Paperless's archive PDF (`GET /api/documents/{id}/download/?original=false`). This is the searchable PDF Paperless generates post-consumption: same visual as the original but with a Tesseract text layer embedded.
+2. Use `pdfplumber` to read word-level bounding boxes from the archive's text layer.
+3. Scale the boxes from PDF points to the pixel coordinates the slicer is working in.
+4. For each candidate region, compute the fraction of its area covered by Tesseract word boxes.
+5. If coverage ≥ 0.25, classify as **printed** and drop the region. Otherwise, keep for HTR.
+
+### Threshold choice
+
+Coverage at 0.25 was chosen from observations on mixed handwritten/printed scans:
+- Printed line with good scan: coverage ~0.55-0.85
+- Printed line with poor scan: ~0.20-0.50
+- Handwritten line: ~0.00-0.15 (Tesseract typically outputs nothing for cursive)
+- Mixed line (printed + handwritten note): ~0.25-0.40
+
+0.25 catches the main failure mode (printed regions → TrOCR → garbage) while keeping mixed-content regions. Tunable via the `PRINTED_COVERAGE_THRESHOLD` constant in `printed_filter.py`.
+
+### Fallback behavior
+
+If the archive PDF is missing (some uploads skip archive generation) or `pdfplumber` fails to parse it, the filter returns all candidate regions unchanged — the slicer degrades to its original behavior. The log makes this explicit: "No archive PDF — printed-filter disabled".
 
 ## Text merging (Tesseract + HTR)
 

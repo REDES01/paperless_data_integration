@@ -27,6 +27,11 @@ from pdf2image import convert_from_bytes
 from PIL import Image
 
 from detector import detect_regions, crop_region
+from printed_filter import (
+    extract_tesseract_word_boxes,
+    filter_handwritten_regions,
+    PRINTED_COVERAGE_THRESHOLD,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -149,6 +154,29 @@ class RegionSlicer:
                 time.sleep(retry_delay)
         raise last_exc  # unreachable, appease linters
 
+    def fetch_document_archive(self, doc_id: int) -> bytes | None:
+        """
+        Download the SEARCHABLE archive PDF for a document.
+
+        Paperless always produces an archive file when it OCRs a document
+        (via Tesseract). The archive is a PDF-with-text-layer — same visual
+        as the original but with word-level bounding boxes we can read back.
+        Some uploads (already-searchable PDFs the user uploaded as-is) may
+        skip archive generation; in that case we return None and the slicer
+        falls back to the original PDF's text layer (if any) or skips the
+        printed-filter step entirely.
+        """
+        url = f"{self.paperless_url}/api/documents/{doc_id}/download/?original=false"
+        try:
+            resp = requests.get(url, headers=self._paperless_headers(), timeout=60)
+            if resp.status_code != 200:
+                log.info("no archive for doc %s (%s)", doc_id, resp.status_code)
+                return None
+            return resp.content
+        except Exception as exc:
+            log.warning("archive fetch failed for doc %s: %s", doc_id, exc)
+            return None
+
     def fetch_document_file(self, doc_id: int) -> tuple[bytes, str]:
         """
         Download the document file from Paperless.
@@ -261,18 +289,40 @@ class RegionSlicer:
             tesseract_text=tesseract_text,
         )
 
-        # 4. Process each page
+        # 4. Fetch the Tesseract archive PDF once (per-doc, not per-page) so
+        # the printed-filter can reuse it for every page's word boxes.
+        archive_bytes = self.fetch_document_archive(doc_id)
+        if archive_bytes:
+            log.info("  Fetched archive PDF (%d bytes) — printed-filter enabled", len(archive_bytes))
+        else:
+            log.info("  No archive PDF — printed-filter disabled, keeping all regions")
+
+        # 5. Process each page
         for page_num, page_image in enumerate(pages, start=1):
             log.info("  Page %d/%d (%dx%d) ...", page_num, len(pages), page_image.width, page_image.height)
 
             # Upload full page image
             self.upload_page_image(page_image, doc_id, page_num)
 
-            # Detect regions
-            regions = detect_regions(page_image)
-            log.info("    %d region(s) detected", len(regions))
+            # Detect ink-dense candidate regions
+            raw_regions = detect_regions(page_image)
+            log.info("    %d raw region(s) detected", len(raw_regions))
 
-            # Crop, upload, and collect results
+            # Filter out regions Tesseract already read (= printed text)
+            tess_boxes = []
+            if archive_bytes:
+                tess_boxes = extract_tesseract_word_boxes(
+                    archive_bytes,
+                    page_size_px=(page_image.width, page_image.height),
+                    page_index=page_num - 1,
+                )
+            regions, rejected = filter_handwritten_regions(raw_regions, tess_boxes)
+            if rejected:
+                log.info("    rejected %d printed region(s) — coverage: %s",
+                         len(rejected),
+                         ", ".join(f"{r.get('tesseract_coverage', 0):.2f}" for r in rejected[:5]))
+
+            # Crop + upload kept (= handwritten) regions
             for idx, region in enumerate(regions):
                 crop = crop_region(page_image, region["bbox"])
                 crop_url = self.upload_crop(crop, doc_id, page_num, idx)

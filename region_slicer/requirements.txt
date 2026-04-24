@@ -3,3 +3,6 @@ Pillow>=10.0
 numpy>=1.24
 minio>=7.2
 requests>=2.31
+# Pure-Python PDF word-box reader, used by printed_filter to read Tesseract's
+# archive PDF and skip printed regions (B1 strategy).
+pdfplumber>=0.11
