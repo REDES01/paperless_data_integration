@@ -43,7 +43,7 @@ import os
 # for testing (set to 1.01 to keep everything) without rebuilding the
 # container.
 PRINTED_COVERAGE_THRESHOLD = float(os.environ.get(
-    "PRINTED_COVERAGE_THRESHOLD", "0.50"
+    "PRINTED_COVERAGE_THRESHOLD", "1.01"
 ))
 
 
