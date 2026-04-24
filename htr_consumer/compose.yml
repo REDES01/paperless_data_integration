@@ -53,6 +53,13 @@ services:
       DRIFT_MONITOR_TIMEOUT_SECONDS: "2.0"
 
       LOG_LEVEL: INFO
+
+      # B1 printed-text filter threshold. Coverage ratio (0.0-1.0) at or above
+      # which a region is considered printed and dropped. Higher = more permissive.
+      #   0.25  aggressive (may drop mixed-content regions like signatures)
+      #   0.50  default balance
+      #   0.90  effectively disabled (keep almost everything)
+      PRINTED_COVERAGE_THRESHOLD: ${PRINTED_COVERAGE_THRESHOLD:-0.50}
     networks:
       - paperless_ml_net          # reach ml_gateway, minio, redpanda, drift_monitor
       - paperless_data_default    # reach the data-role postgres
