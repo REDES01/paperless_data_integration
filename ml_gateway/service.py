@@ -295,7 +295,15 @@ def predict_htr(req: HtrRequest):
     htr_confidence.observe(confidence)
     htr_latency.observe(time.time() - t0)
 
-    flagged = confidence < 0.7     # rubric: confidence threshold determines UI flag
+    # Flag threshold: any region whose confidence falls BELOW this gets
+    # surfaced in the /ml/htr-review UI for human correction. Tunable at
+    # runtime via HTR_FLAG_THRESHOLD env var.
+    #   0.70  default (rubric)
+    #   0.85  more conservative (flag more for review — useful during demo
+    #          when the model is quite confident even on odd crops)
+    #   0.50  more permissive (only flag truly uncertain regions)
+    _flag_threshold = float(os.environ.get("HTR_FLAG_THRESHOLD", "0.85"))
+    flagged = confidence < _flag_threshold
     return {
         "region_id": req.region_id,
         "htr_output": text,
