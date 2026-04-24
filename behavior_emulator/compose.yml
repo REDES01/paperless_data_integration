@@ -1,0 +1,33 @@
+# Behavior emulator — emulates user activity to exercise the feedback loops.
+#
+# Run:
+#   docker compose -p behavior_emulator -f behavior_emulator/compose.yml up -d --build
+# Watch:
+#   docker logs -f behavior_emulator
+# Stop:
+#   docker compose -p behavior_emulator -f behavior_emulator/compose.yml down
+#
+# Mode switch (env BE_MODE):
+#   normal  default, realistic rates (3 corr/min + 2 search/min)
+#   demo    10x rates for video recording
+#   slow    0.1x rates for long unattended runs
+#   off     process stays up but bots sleep (useful for pausing traffic)
+
+services:
+  behavior_emulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: behavior_emulator:latest
+    container_name: behavior_emulator
+    restart: unless-stopped
+    environment:
+      BE_MODE:        ${BE_MODE:-normal}
+      DB_DSN:         host=postgres port=5432 dbname=paperless user=user password=paperless_postgres
+      ML_GATEWAY_URL: http://ml_gateway:8000
+    networks:
+      - paperless_ml_net
+
+networks:
+  paperless_ml_net:
+    external: true
