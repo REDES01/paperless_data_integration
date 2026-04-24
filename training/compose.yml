@@ -12,13 +12,8 @@
 #   docker compose -f training/compose.yml run --rm finetune_corrections
 #   docker compose -f training/compose.yml run --rm finetune_combined
 #
-# Recurring scheduler (fires the CANDIDATE service every INTERVAL_MIN minutes):
-#   docker compose -f training/compose.yml up -d training_scheduler
-#   docker compose -f training/compose.yml logs -f training_scheduler
-#
-# To change what the scheduler runs:
-#   CANDIDATE=finetune_iam_stage1 INTERVAL_MIN=60 \
-#       docker compose -f training/compose.yml up -d training_scheduler
+# Note: recurring retraining is handled by the airflow htr_retraining DAG
+# (see ../airflow/dags/htr_training.py) — not by a separate docker scheduler.
 
 services:
   _base: &training_base
@@ -65,31 +60,6 @@ services:
   finetune_combined_stage1:
     <<: *training_base
     command: ["--config", "/app/configs/finetune_combined_stage1.yaml"]
-
-  # ── Recurring training scheduler ─────────────────────────────────
-  # A long-running daemon that fires the training pipeline periodically.
-  # Uses the mounted docker socket to invoke `docker compose run` — the
-  # standard pattern for docker-native schedulers.
-  training_scheduler:
-    build:
-      context: ../training_scheduler
-      dockerfile: Dockerfile
-    image: training_scheduler:latest
-    container_name: training_scheduler
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./compose.yml:/compose.yml:ro
-    environment:
-      # Demo: 60 min cadence (visible in video if you leave it running).
-      # Production: set INTERVAL_MIN=1440 (daily) to align with the
-      # typical cadence of user-correction accumulation.
-      INTERVAL_MIN: ${INTERVAL_MIN:-60}
-      CANDIDATE: ${CANDIDATE:-finetune_combined_stage1}
-      COMPOSE_PROJECT: training
-      COMPOSE_FILE: /compose.yml
-    networks:
-      - paperless_ml_net
 
 networks:
   paperless_ml_net:

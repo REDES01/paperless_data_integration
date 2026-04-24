@@ -1,6 +1,6 @@
 # Continuous retraining: TrOCR-base-stage1 fine-tuned on IAM + user corrections.
 #
-# This is the target for training_scheduler — every INTERVAL_MIN minutes the
+# This is the target for the airflow htr_retraining DAG — each scheduled run
 # scheduler fires this service. Gate logic (trainer.py) decides whether to
 # register the result as a new htr version.
 #
