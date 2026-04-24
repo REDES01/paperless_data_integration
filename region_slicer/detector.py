@@ -8,22 +8,54 @@ horizontally. Filters by minimum region size.
 
 This module has zero external dependencies beyond numpy + Pillow so it can
 be imported anywhere without pulling in the full data stack.
+
+Tunable thresholds are all env-var overridable so the filter behavior can
+be tweaked without rebuilding the container. Sensible defaults target
+phone-photo-of-notebook scans where pen ink is clear (<150) and pencil
+can be faint (180-210).
 """
 
 import logging
+import os
 
 import numpy as np
 from PIL import Image
 
 log = logging.getLogger(__name__)
 
-# ── Tunable thresholds ─────────────────────────
-BINARIZATION_THRESHOLD = 180   # pixels darker than this are "ink"
-INK_START_RATIO = 0.02         # row is "ink" if ink pixels > 2% of row width
-INK_END_RATIO = 0.01           # row is "gap" if ink pixels <= 1% of row width
-MIN_REGION_WIDTH = 50          # ignore regions narrower than this (px)
-MIN_REGION_HEIGHT = 15         # ignore regions shorter than this (px)
-PADDING = 5                    # extra pixels around each crop
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+# ── Tunable thresholds (env-var overridable) ─────────────────────────
+# BINARIZATION_THRESHOLD: pixels with grayscale value BELOW this are "ink".
+#   Default 210 catches pencil + faint pen ink on off-white paper.
+#   Lower (120) if scans are over-triggering on paper texture.
+#   Higher (230) if scans have extremely light ink like dry-erase or
+#   heavily-faded old documents.
+BINARIZATION_THRESHOLD = _env_int("SLICER_BINARIZATION_THRESHOLD", 210)
+
+# INK_START/END_RATIO: fraction of row width that must be inked for a
+# row to count as part of a region (start) or not (end). A row of 2000px
+# width is "in region" if more than 2%=40 inked pixels, "out of region"
+# if ≤ 1%=20 inked pixels.
+INK_START_RATIO = _env_float("SLICER_INK_START_RATIO", 0.01)
+INK_END_RATIO   = _env_float("SLICER_INK_END_RATIO",   0.005)
+
+MIN_REGION_WIDTH  = _env_int("SLICER_MIN_REGION_WIDTH",  50)
+MIN_REGION_HEIGHT = _env_int("SLICER_MIN_REGION_HEIGHT", 15)
+PADDING           = _env_int("SLICER_PADDING",           5)
 
 
 def detect_regions(page_image: Image.Image) -> list[dict]:
@@ -44,6 +76,16 @@ def detect_regions(page_image: Image.Image) -> list[dict]:
 
     # Horizontal projection: sum of ink pixels per row
     h_proj = binary.sum(axis=1)
+
+    # Quick debug telemetry — if the threshold is wrong for this image,
+    # the projection will either be all-zero (too dark threshold) or
+    # near-uniform (too light threshold). Log the mean so the operator
+    # can spot it in consumer logs.
+    mean_ink_ratio = float(h_proj.mean()) / max(1, w)
+    log.info(
+        "slicer: %dx%d image, binarization<%d, mean ink ratio %.3f",
+        w, arr.shape[0], BINARIZATION_THRESHOLD, mean_ink_ratio,
+    )
 
     regions = []
     in_region = False
