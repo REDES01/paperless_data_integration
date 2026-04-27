@@ -25,6 +25,7 @@ DB_DSN = os.environ.get(
     "host=postgres port=5432 dbname=paperless user=user password=paperless_postgres",
 )
 ML_GATEWAY_URL = os.environ.get("ML_GATEWAY_URL", "http://ml_gateway:8000")
+SEARCH_ENDPOINT = os.environ.get("SEARCH_ENDPOINT", "/predict/search")
 
 # ── Correction persona weights ──────────────────────────────────────────
 # Careful: reads the image, fixes most typos — produces meaningful corrections

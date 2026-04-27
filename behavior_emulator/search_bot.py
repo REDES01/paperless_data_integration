@@ -39,6 +39,7 @@ from config import (
     P_FEEDBACK_IRRELEVANT,
     P_FEEDBACK_RELEVANT,
     QUERY_POOL,
+    SEARCH_ENDPOINT,
     SEARCH_K,
     SEARCHES_PER_MIN,
 )
@@ -126,7 +127,7 @@ def _tick(http: requests.Session, stats: Stats) -> None:
     # the new shape for clarity.
     try:
         resp = http.post(
-            f"{ML_GATEWAY_URL}/predict/search",
+            f"{ML_GATEWAY_URL}{SEARCH_ENDPOINT}",
             json={"query_text": query, "top_k": SEARCH_K},
             timeout=10,
         )
