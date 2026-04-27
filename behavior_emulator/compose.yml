@@ -25,9 +25,16 @@ services:
       BE_MODE:        ${BE_MODE:-normal}
       DB_DSN:         host=postgres port=5432 dbname=paperless user=user password=paperless_postgres
       ML_GATEWAY_URL: http://ml_gateway:8000
+    # Dual-network attach: paperless_ml_net to reach ml_gateway (the consumer
+    # of synthetic /htr + /search/query traffic), paperless_data_default to
+    # reach the data-stack postgres which holds htr_corrections and
+    # query_sessions (where the bots write feedback rows).
     networks:
       - paperless_ml_net
+      - paperless_data_default
 
 networks:
   paperless_ml_net:
+    external: true
+  paperless_data_default:
     external: true
