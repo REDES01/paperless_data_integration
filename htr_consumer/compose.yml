@@ -30,7 +30,7 @@ services:
       # Solo-build ml_gateway runs on the shared network as `ml_gateway:8000`.
       # Fall back name fastapi_server is kept as an alias for older configs.
       FASTAPI_URL: http://ml_gateway:8000
-      HTR_ENDPOINT: /predict/htr
+      HTR_ENDPOINT: ${HTR_ENDPOINT:-/predict/htr}
 
       PAPERLESS_URL: http://webserver:8000
       PAPERLESS_TOKEN: ${PAPERLESS_TOKEN:?PAPERLESS_TOKEN env var is required}
