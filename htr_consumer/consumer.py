@@ -54,16 +54,6 @@ def _build_consumer() -> KafkaConsumer:
     topic  = os.environ.get("KAFKA_TOPIC", "paperless.uploads")
     group  = os.environ.get("KAFKA_GROUP_ID", "htr-preprocessing")
 
-    # Long documents (e.g. 200+ page books) take longer to process than
-    # kafka-python's defaults (max_poll_interval_ms=300_000, max_poll_records=500),
-    # which causes the broker to mark the consumer dead, rebalance the group,
-    # and fail the in-flight commit — producing an infinite reprocessing loop.
-    # Defaults below are sized for HTR workloads: 30 min poll interval (covers
-    # multi-hundred-page documents) and one record at a time (so a slow
-    # document can't block siblings in the same poll batch).
-    max_poll_interval_ms = int(os.environ.get("KAFKA_MAX_POLL_INTERVAL_MS", "1800000"))
-    max_poll_records     = int(os.environ.get("KAFKA_MAX_POLL_RECORDS", "1"))
-
     # Retry connect forever — if redpanda isn't ready yet, wait for it.
     while True:
         try:
@@ -73,15 +63,9 @@ def _build_consumer() -> KafkaConsumer:
                 group_id=group,
                 auto_offset_reset="earliest",  # process any events we missed
                 enable_auto_commit=False,
-                max_poll_interval_ms=max_poll_interval_ms,
-                max_poll_records=max_poll_records,
                 value_deserializer=lambda v: json.loads(v.decode("utf-8")),
             )
-            log.info(
-                "Connected to Kafka at %s, topic=%s, group=%s "
-                "(max_poll_interval_ms=%d, max_poll_records=%d)",
-                broker, topic, group, max_poll_interval_ms, max_poll_records,
-            )
+            log.info("Connected to Kafka at %s, topic=%s, group=%s", broker, topic, group)
             return c
         except NoBrokersAvailable:
             log.warning("Kafka not ready at %s, retrying in 5s", broker)
