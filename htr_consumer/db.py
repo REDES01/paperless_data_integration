@@ -15,15 +15,6 @@ import psycopg
 log = logging.getLogger(__name__)
 
 
-class ReprocessSkipped(Exception):
-    """Raised when reprocessing would clobber user corrections.
-
-    The consumer's outer ``except Exception`` catches this and treats it as
-    a recoverable skip: log at INFO level (no traceback), commit the Kafka
-    offset, move on. User corrections stay intact in ``htr_corrections``.
-    """
-
-
 def _conn_info() -> dict:
     return {
         "host":     os.environ.get("ML_DB_HOST", "postgres"),
@@ -113,30 +104,7 @@ def delete_existing_pages_and_regions(cur, document_id: str) -> None:
     Called before inserts so that reprocessing a document doesn't accumulate
     duplicate page/region rows. Cascade via a DELETE on pages removes
     FK-dependent regions via a separate explicit delete first.
-
-    If user corrections exist for any region of this document, the unconditional
-    DELETE would fail with ``psycopg.errors.ForeignKeyViolation`` on
-    ``htr_corrections_region_id_fkey``. To preserve user feedback, we pre-check
-    and raise ``ReprocessSkipped`` instead — the consumer treats this as a
-    recoverable skip (no traceback, advances Kafka offset, leaves data intact).
     """
-    cur.execute(
-        """
-        SELECT count(*)
-        FROM htr_corrections c
-        JOIN handwritten_regions r ON c.region_id = r.id
-        JOIN document_pages p     ON r.page_id   = p.id
-        WHERE p.document_id = %s
-        """,
-        (document_id,),
-    )
-    (correction_count,) = cur.fetchone()
-    if correction_count > 0:
-        raise ReprocessSkipped(
-            f"document_id={document_id} has {correction_count} user "
-            "correction(s); skipping reprocess to preserve them"
-        )
-
     cur.execute(
         """
         DELETE FROM handwritten_regions
